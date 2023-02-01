@@ -1,0 +1,8 @@
+[package]
+name = "htm-rs"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+ndarray = "0.15"
+rand = "0.8"
