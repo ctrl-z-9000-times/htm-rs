@@ -1,5 +1,5 @@
 mod sdr;
-pub use sdr::{Idx, AP, SDR};
+pub use sdr::{Idx, SDR};
 
 mod syn;
 pub use syn::{SynapseType, Synapses};

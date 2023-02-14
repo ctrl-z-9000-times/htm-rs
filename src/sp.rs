@@ -54,14 +54,14 @@ impl SpatialPooler {
         Self { args, syn, af }
     }
 
-    fn lazy_init(&mut self, inputs: &SDR) {
+    fn lazy_init(&mut self, inputs: &mut SDR) {
         if self.syn.axons() > 0 {
             return;
         }
-        self.syn.add_axons(inputs.len());
+        self.syn.add_axons(inputs.num_cells());
         self.syn
             .add_dendrites(self.args.num_cells * self.args.num_dendrites);
-        let mut all_inputs = SDR::ones(inputs.len());
+        let mut all_inputs = SDR::ones(inputs.num_cells());
         for d in 0..self.syn.dendrites() {
             self.syn.grow(&mut all_inputs, &[0.5], d);
         }

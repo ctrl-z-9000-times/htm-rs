@@ -1,4 +1,4 @@
-use crate::{Idx, AP, SDR};
+use crate::{Idx, SDR};
 use rand::prelude::*;
 
 pub struct Synapses {
@@ -60,7 +60,7 @@ impl Synapses {
     /// Randomly sample the active axons.
     pub fn grow(&mut self, activity: &mut SDR, weights: &[f32], dendrite: usize) {
         let mut rng = rand::thread_rng();
-        let (index, _weight) = activity.sparse();
+        let index = activity.sparse();
         let num_grow = index.len().min(weights.len());
         let sample = index.choose_multiple(&mut rng, num_grow);
 
@@ -78,11 +78,10 @@ impl Synapses {
 
     pub fn activate(&self, activity: &mut SDR) -> ndarray::Array1<f32> {
         let mut accumulators = vec![0.0; self.dendrites()];
-        let (index, activity) = activity.sparse();
 
-        for (&axon, &state) in index.iter().zip(activity) {
+        for &axon in activity.sparse().iter() {
             for &dendrite in &self.axon_targets[axon] {
-                accumulators[dendrite] += state as f32;
+                accumulators[dendrite] += 1.0;
             }
         }
         accumulators.into()
