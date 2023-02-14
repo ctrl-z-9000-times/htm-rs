@@ -104,10 +104,6 @@ impl SDR {
         self.dense_.unwrap()
     }
 
-    pub fn corrupt() {
-        todo!()
-    }
-
     pub fn overlap(&mut self, other: &mut Self) -> usize {
         assert_eq!(self.num_cells(), other.num_cells());
         let mut ovlp = 0;
@@ -121,6 +117,24 @@ impl SDR {
 
     pub fn percent_overlap(&mut self, other: &mut Self) -> f32 {
         self.overlap(other) as f32 / self.num_active().max(other.num_active()) as f32
+    }
+
+    pub fn corrupt(&mut self, percent_noise: f32) -> Self {
+        let index = self.sparse().clone();
+        todo!();
+        Self::from_sparse(self.num_cells(), index)
+    }
+
+    pub fn concatenate(sdrs: &mut [SDR]) -> Self {
+        todo!()
+    }
+
+    pub fn union(sdrs: &mut [SDR]) -> Self {
+        todo!()
+    }
+
+    pub fn intersection(sdrs: &mut [SDR]) -> Self {
+        todo!()
     }
 }
 
@@ -175,6 +189,20 @@ mod tests {
 
     #[test]
     fn corrupt() {
-        todo!()
+        let mut a = SDR::random(100, 0.1);
+        let mut b = a.corrupt(0.5);
+        assert_eq!(a.overlap(&mut b), 5);
+    }
+
+    #[test]
+    fn join() {
+        // Test concatenate
+        todo!();
+
+        // Test union
+        todo!();
+
+        // Test intersection
+        todo!();
     }
 }
