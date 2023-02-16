@@ -126,7 +126,20 @@ impl SDR {
     }
 
     pub fn concatenate(sdrs: &mut [SDR]) -> Self {
-        todo!()
+        let inputs: Vec<_> = sdrs.iter_mut().map(|x| x.sparse()).collect();
+
+        let num_cells = sdrs.iter().map(|x| x.num_cells()).sum();
+        let num_active = sdrs.iter_mut().map(|x| x.num_active()).sum();
+
+        let mut sparse = Vec::with_capacity(num_active);
+        let mut offset = 0;
+        for x in sdrs.iter_mut() {
+            for i in x.sparse() {
+                sparse.push(i + offset);
+            }
+            offset += x.num_cells();
+        }
+        Self::from_sparse(num_cells, sparse)
     }
 
     pub fn union(sdrs: &mut [SDR]) -> Self {
@@ -195,13 +208,20 @@ mod tests {
     }
 
     #[test]
-    fn join() {
-        // Test concatenate
-        todo!();
+    fn concatenate() {
+        let mut a = SDR::from_sparse(10, vec![3, 4, 5]);
+        let mut b = SDR::from_sparse(10, vec![3, 4, 5]);
+        let mut c = SDR::from_sparse(10, vec![3, 4, 5]);
+        let mut d = SDR::concatenate(&mut [a, b, c]);
+        assert_eq!(d.sparse(), &[3, 4, 5, 13, 14, 15, 23, 24, 25]);
+    }
 
-        // Test union
+    #[test]
+    fn test_union() {
         todo!();
-
+    }
+    #[test]
+    fn test_intersection() {
         // Test intersection
         todo!();
     }
