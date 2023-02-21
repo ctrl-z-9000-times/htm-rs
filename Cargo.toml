@@ -4,5 +4,6 @@ version = "0.0.1"
 edition = "2021"
 
 [dependencies]
+bitvec = "1.0.1"
 ndarray = "0.15"
 rand = "0.8"

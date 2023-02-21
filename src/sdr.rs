@@ -1,24 +1,25 @@
-// TODO: Change Idx to u32.
-pub type Idx = usize;
+use bitvec::prelude::*;
+
+pub type Idx = u32;
 
 /// Sparse Distributed Representation
 pub struct SDR {
-    num_cells_: usize,
+    num_cells_: Idx,
     sparse_: Option<Vec<Idx>>,
-    dense_: Option<ndarray::Array1<bool>>,
+    dense_: Option<BitBox>,
 }
 
 impl SDR {
     pub fn zeros(num_cells: usize) -> Self {
         Self {
-            num_cells_: num_cells,
+            num_cells_: num_cells.try_into().unwrap(),
             sparse_: None,
             dense_: None,
         }
     }
 
     pub fn ones(num_cells: usize) -> Self {
-        Self::from_dense(vec![true; num_cells].into())
+        Self::from_dense(&vec![true; num_cells])
     }
 
     pub fn random(num_cells: usize, sparsity: f32) -> Self {
@@ -26,12 +27,13 @@ impl SDR {
         let num_active = (num_cells as f32 * sparsity).round() as usize;
         let index = rand::seq::index::sample(&mut rng, num_cells, num_active)
             .iter()
+            .map(|x| x as Idx)
             .collect();
         Self::from_sparse(num_cells, index)
     }
 
     pub fn num_cells(&self) -> usize {
-        self.num_cells_
+        self.num_cells_ as usize
     }
 
     pub fn num_active(&mut self) -> usize {
@@ -39,12 +41,22 @@ impl SDR {
     }
 
     pub fn sparsity(&mut self) -> f32 {
-        self.sparse().len() as f32 / self.num_cells() as f32
+        if self.num_cells() == 0 {
+            0.0
+        } else {
+            self.sparse().len() as f32 / self.num_cells() as f32
+        }
     }
 
-    pub fn from_sparse(num_cells: usize, index: Vec<Idx>) -> Self {
+    pub fn from_sparse(num_cells: usize, mut index: Vec<Idx>) -> Self {
+        index.sort();
+        index.dedup();
+        if let Some(last) = index.last() {
+            let last = *last as usize;
+            assert!(last < num_cells);
+        }
         Self {
-            num_cells_: num_cells,
+            num_cells_: num_cells.try_into().unwrap(),
             sparse_: Some(index),
             dense_: None,
         }
@@ -52,14 +64,12 @@ impl SDR {
 
     /// Get a read-only view of this SDR's data.
     pub fn sparse(&mut self) -> &Vec<Idx> {
-        if self.sparse_.is_some() {
-            // Do nothing, the data is already computed.
-        } else {
+        if self.sparse_.is_none() {
             let mut index = vec![];
             if let Some(d) = &self.dense_ {
-                for (i, &x) in d.iter().enumerate() {
-                    if x {
-                        index.push(i);
+                for (i, x) in d.iter().enumerate() {
+                    if *x {
+                        index.push(i as Idx);
                     }
                 }
             }
@@ -74,32 +84,34 @@ impl SDR {
         self.sparse_.unwrap()
     }
 
-    pub fn from_dense(dense: ndarray::Array1<bool>) -> Self {
+    pub fn from_dense(dense: &[bool]) -> Self {
+        let mut bits = BitVec::with_capacity(dense.len());
+        for x in dense {
+            bits.push(*x)
+        }
         Self {
-            num_cells_: dense.len(),
+            num_cells_: dense.len().try_into().unwrap(),
             sparse_: None,
-            dense_: Some(dense),
+            dense_: Some(bits.into_boxed_bitslice()),
         }
     }
 
     /// Get a read-only view of this SDR's data.
-    pub fn dense(&mut self) -> &ndarray::Array1<bool> {
-        if self.dense_.is_some() {
-            // Do nothing, the data is already computed.
-        } else {
-            let mut d = vec![false; self.num_cells()];
+    pub fn dense(&mut self) -> &BitBox {
+        if self.dense_.is_none() {
+            let mut bits = bitvec![0; self.num_cells()];
             if let Some(index) = &self.sparse_ {
-                for &i in index.iter() {
-                    d[i] = true;
+                for i in index.iter() {
+                    bits.set(*i as usize, true);
                 }
             }
-            self.dense_ = Some(d.into());
+            self.dense_ = Some(bits.into_boxed_bitslice());
         }
         self.dense_.as_ref().unwrap()
     }
 
     /// Consume this SDR and return its dense formatted data.
-    pub fn dense_mut(mut self) -> ndarray::Array1<bool> {
+    pub fn dense_mut(mut self) -> BitBox {
         self.dense();
         self.dense_.unwrap()
     }
@@ -107,8 +119,8 @@ impl SDR {
     pub fn overlap(&mut self, other: &mut Self) -> usize {
         assert_eq!(self.num_cells(), other.num_cells());
         let mut ovlp = 0;
-        for (&a, &b) in self.dense().iter().zip(other.dense()) {
-            if a && b {
+        for (a, b) in self.dense().iter().zip(other.dense().iter()) {
+            if *a && *b {
                 ovlp += 1;
             }
         }
@@ -121,13 +133,11 @@ impl SDR {
 
     pub fn corrupt(&mut self, percent_noise: f32) -> Self {
         let index = self.sparse().clone();
-        todo!();
+        // todo!();
         Self::from_sparse(self.num_cells(), index)
     }
 
     pub fn concatenate(sdrs: &mut [SDR]) -> Self {
-        let inputs: Vec<_> = sdrs.iter_mut().map(|x| x.sparse()).collect();
-
         let num_cells = sdrs.iter().map(|x| x.num_cells()).sum();
         let num_active = sdrs.iter_mut().map(|x| x.num_active()).sum();
 
@@ -137,7 +147,7 @@ impl SDR {
             for i in x.sparse() {
                 sparse.push(i + offset);
             }
-            offset += x.num_cells();
+            offset += x.num_cells() as Idx;
         }
         Self::from_sparse(num_cells, sparse)
     }
@@ -154,6 +164,7 @@ impl SDR {
 #[cfg(test)]
 mod tests {
     use crate::SDR;
+    use bitvec::prelude::*;
 
     #[test]
     fn basic() {
@@ -171,12 +182,12 @@ mod tests {
 
     #[test]
     fn convert() {
-        let mut a = SDR::from_dense(vec![false, true, false, true, false, true].into());
+        let mut a = SDR::from_dense(&vec![false, true, false, true, false, true]);
         assert_eq!(a.sparse(), &[1, 3, 5]);
 
         let mut b = SDR::zeros(3);
         assert_eq!(b.sparse(), &[]);
-        assert_eq!(b.dense().to_vec(), [false, false, false]);
+        assert_eq!(b.dense(), bits![0, 0, 0]);
 
         let mut c = SDR::from_sparse(6, vec![1, 3, 5]);
         assert_eq!(c.dense(), a.dense());
@@ -213,6 +224,7 @@ mod tests {
         let mut b = SDR::from_sparse(10, vec![3, 4, 5]);
         let mut c = SDR::from_sparse(10, vec![3, 4, 5]);
         let mut d = SDR::concatenate(&mut [a, b, c]);
+        assert_eq!(d.num_cells(), 30);
         assert_eq!(d.sparse(), &[3, 4, 5, 13, 14, 15, 23, 24, 25]);
     }
 
