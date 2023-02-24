@@ -163,8 +163,7 @@ impl SDR {
 
 #[cfg(test)]
 mod tests {
-    use crate::SDR;
-    use bitvec::prelude::*;
+    use super::*;
 
     #[test]
     fn basic() {
