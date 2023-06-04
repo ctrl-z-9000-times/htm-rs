@@ -63,7 +63,7 @@ impl Synapses {
     }
 
     /// Randomly sample the active axons.
-    pub fn add_synapses(&mut self, axons: &mut SDR, dendrite: Idx, weights: &[f32]) {
+    pub fn grow_synapses(&mut self, axons: &mut SDR, dendrite: Idx, weights: &[f32]) {
         debug_assert!(axons.num_cells() == self.num_axons());
         debug_assert!(dendrite < self.num_dendrites() as Idx);
         let mut rng = rand::thread_rng();
@@ -77,7 +77,7 @@ impl Synapses {
     }
 
     fn sort_by_axon(&mut self) {
-        if !self.syn_sorted_ {
+        if !self.syn_sorted_ && self.num_synapses() > 0 {
             // Sort the synapses by their presynaptic axon.
             let mut argsort: Vec<_> = (0..self.num_synapses()).collect();
             argsort.sort_by_key(|&idx| self.syn_axons_[idx as usize]);
@@ -132,7 +132,6 @@ impl Synapses {
         let mut connected = vec![0; self.num_dendrites()];
 
         for &axon in activity.sparse().iter() {
-            dbg!(&self.axon_syn_ranges_);
             for syn in self.axon_syn_ranges_[axon as usize].clone() {
                 let dend = self.syn_dendrites_[syn as usize];
                 let perm = self.syn_permanences_[syn as usize];
@@ -170,6 +169,18 @@ impl Synapses {
     pub fn reset(&mut self) {}
 }
 
+impl std::fmt::Debug for Synapses {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Synapses (Axons: {}, Dendrites: {} Synapses: {})\n",
+            self.num_axons(),
+            self.num_dendrites(),
+            self.num_synapses(),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,7 +190,7 @@ mod tests {
         let mut x = Synapses::default();
         assert_eq!(x.add_axons(10), 0..10);
         assert_eq!(x.add_dendrites(10), 0..10);
-        x.add_synapses(&mut SDR::ones(10), 3, &[0.6, 0.4, 0.5]);
+        x.grow_synapses(&mut SDR::ones(10), 3, &[0.6, 0.4, 0.5]);
         assert_eq!(x.num_synapses(), 3);
         let (pot, con) = x.activate(&mut SDR::ones(10));
         assert_eq!(pot, [0, 0, 0, 3, 0, 0, 0, 0, 0, 0]);
@@ -191,7 +202,7 @@ mod tests {
         let mut x = Synapses::default();
         x.add_axons(2);
         x.add_dendrites(1);
-        x.add_synapses(&mut SDR::ones(2), 0, &[0.5, 0.5]);
+        x.grow_synapses(&mut SDR::ones(2), 0, &[0.5, 0.5]);
         let mut pattern = SDR::from_dense(&[false, true]);
         x.hebbian(&mut pattern, &mut SDR::ones(1), 0.1, -0.1);
         let (pot, con) = x.activate(&mut SDR::ones(2));

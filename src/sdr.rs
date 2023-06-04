@@ -1,5 +1,12 @@
 use bitvec::prelude::*;
 
+// NOTES: I'd like to make SDR's immutable so that I don't need to keep writing
+// out "mut" everywhere. This should be doable with a RefCell lock on the whole
+// structure? Or I could premptively calc both representations at construction.
+
+// TODO: Make SDR::from_sparse() and SDR::from_dense() accept anything that can
+// be coerced into an iterable.
+
 pub type Idx = u32;
 
 /// Sparse Distributed Representation
@@ -161,6 +168,12 @@ impl SDR {
     }
 }
 
+impl std::fmt::Debug for SDR {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SDR({})\n", self.num_cells(),)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -231,6 +244,7 @@ mod tests {
     fn test_union() {
         todo!();
     }
+
     #[test]
     fn test_intersection() {
         // Test intersection
