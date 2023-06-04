@@ -125,7 +125,7 @@ impl SpatialPooler {
     pub fn learn(&mut self, inputs: &mut SDR, activity: &mut SDR) {
         self.lazy_init(inputs);
         self.update_af(activity);
-        //
+        // Hebbian Learning.
         let incr = 1.0 - (-1.0 / self.args.learning_period).exp();
         let decr = -incr / self.args.coincidence_ratio;
         self.syn.hebbian(inputs, activity, incr, decr);

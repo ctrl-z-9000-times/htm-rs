@@ -1,4 +1,5 @@
 use bitvec::prelude::*;
+use rand::prelude::SliceRandom;
 
 // NOTES: I'd like to make SDR's immutable so that I don't need to keep writing
 // out "mut" everywhere. This should be doable with a RefCell lock on the whole
@@ -18,15 +19,15 @@ pub struct SDR {
 
 impl SDR {
     pub fn zeros(num_cells: usize) -> Self {
-        Self {
+        return Self {
             num_cells_: num_cells.try_into().unwrap(),
             sparse_: None,
             dense_: None,
-        }
+        };
     }
 
     pub fn ones(num_cells: usize) -> Self {
-        Self::from_dense(&vec![true; num_cells])
+        return Self::from_dense(&vec![true; num_cells]);
     }
 
     pub fn random(num_cells: usize, sparsity: f32) -> Self {
@@ -36,22 +37,22 @@ impl SDR {
             .iter()
             .map(|x| x as Idx)
             .collect();
-        Self::from_sparse(num_cells, index)
+        return Self::from_sparse(num_cells, index);
     }
 
     pub fn num_cells(&self) -> usize {
-        self.num_cells_ as usize
+        return self.num_cells_ as usize;
     }
 
     pub fn num_active(&mut self) -> usize {
-        self.sparse().len()
+        return self.sparse().len();
     }
 
     pub fn sparsity(&mut self) -> f32 {
         if self.num_cells() == 0 {
-            0.0
+            return 0.0;
         } else {
-            self.sparse().len() as f32 / self.num_cells() as f32
+            return self.sparse().len() as f32 / self.num_cells() as f32;
         }
     }
 
@@ -62,11 +63,11 @@ impl SDR {
             let last = *last as usize;
             assert!(last < num_cells);
         }
-        Self {
+        return Self {
             num_cells_: num_cells.try_into().unwrap(),
             sparse_: Some(index),
             dense_: None,
-        }
+        };
     }
 
     /// Get a read-only view of this SDR's data.
@@ -82,13 +83,13 @@ impl SDR {
             }
             self.sparse_ = Some(index);
         }
-        self.sparse_.as_ref().unwrap()
+        return self.sparse_.as_ref().unwrap();
     }
 
     /// Consume this SDR and return its sparse formatted data.
     pub fn sparse_mut(mut self) -> Vec<Idx> {
         self.sparse();
-        self.sparse_.unwrap()
+        return self.sparse_.unwrap();
     }
 
     pub fn from_dense(dense: &[bool]) -> Self {
@@ -96,11 +97,11 @@ impl SDR {
         for x in dense {
             bits.push(*x)
         }
-        Self {
+        return Self {
             num_cells_: dense.len().try_into().unwrap(),
             sparse_: None,
             dense_: Some(bits.into_boxed_bitslice()),
-        }
+        };
     }
 
     /// Get a read-only view of this SDR's data.
@@ -114,13 +115,13 @@ impl SDR {
             }
             self.dense_ = Some(bits.into_boxed_bitslice());
         }
-        self.dense_.as_ref().unwrap()
+        return self.dense_.as_ref().unwrap();
     }
 
     /// Consume this SDR and return its dense formatted data.
     pub fn dense_mut(mut self) -> BitBox {
         self.dense();
-        self.dense_.unwrap()
+        return self.dense_.unwrap();
     }
 
     pub fn overlap(&mut self, other: &mut Self) -> usize {
@@ -131,17 +132,51 @@ impl SDR {
                 ovlp += 1;
             }
         }
-        ovlp
+        return ovlp;
     }
 
     pub fn percent_overlap(&mut self, other: &mut Self) -> f32 {
-        self.overlap(other) as f32 / self.num_active().max(other.num_active()) as f32
+        return self.overlap(other) as f32 / self.num_active().max(other.num_active()) as f32;
     }
 
     pub fn corrupt(&mut self, percent_noise: f32) -> Self {
-        let index = self.sparse().clone();
-        todo!();
-        Self::from_sparse(self.num_cells(), index)
+        assert!(0.0 <= percent_noise && percent_noise <= 1.0);
+        let num_cells = self.num_cells();
+        let num_active = self.num_active();
+        let active = self.sparse();
+        // Make a list of all cells that are not active.
+        let mut silent = Vec::with_capacity(num_cells - num_active);
+        let mut active_iter = active.iter().peekable();
+        for cell in 0..num_cells as Idx {
+            if active_iter.peek() == Some(&&cell) {
+                active_iter.next();
+            } else {
+                silent.push(cell);
+            }
+        }
+        // Choose the cells to move and where to move them.
+        let mut rng = rand::thread_rng();
+        let num_move = (percent_noise * active.len() as f32).round() as usize;
+        assert!(num_move <= active.len());
+        assert!(num_move <= silent.len());
+        let turn_off = active.choose_multiple(&mut rng, num_move);
+        let turn_on = silent.choose_multiple(&mut rng, num_move);
+        // Build the new SDR's sparse data list.
+        let mut corrupted = Vec::with_capacity(active.len());
+        let mut turn_off: Vec<_> = turn_off.collect();
+        turn_off.sort();
+        let mut turn_off_iter = turn_off.iter().peekable();
+        for cell in active {
+            if turn_off_iter.peek() == Some(&&cell) {
+                turn_off_iter.next();
+            } else {
+                corrupted.push(*cell);
+            }
+        }
+        for cell in turn_on {
+            corrupted.push(*cell);
+        }
+        return Self::from_sparse(self.num_cells(), corrupted);
     }
 
     pub fn concatenate(sdrs: &mut [SDR]) -> Self {
@@ -156,24 +191,24 @@ impl SDR {
             }
             offset += x.num_cells() as Idx;
         }
-        Self::from_sparse(num_cells, sparse)
+        return Self::from_sparse(num_cells, sparse);
     }
 
     pub fn union(sdrs: &mut [SDR]) -> Self {
-        todo!()
+        return todo!();
     }
 
     pub fn intersection(sdrs: &mut [SDR]) -> Self {
-        todo!()
+        return todo!();
     }
 }
 
 impl std::fmt::Debug for SDR {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(sparse) = &self.sparse_ {
-            write!(f, "SDR({}, nact={})\n", self.num_cells(), sparse.len())
+            writeln!(f, "SDR({}, nact={})", self.num_cells(), sparse.len())
         } else {
-            write!(f, "SDR({})\n", self.num_cells(),)
+            writeln!(f, "SDR({})", self.num_cells(),)
         }
     }
 }
@@ -251,7 +286,6 @@ mod tests {
 
     #[test]
     fn test_intersection() {
-        // Test intersection
         todo!();
     }
 }

@@ -1,3 +1,9 @@
+#![allow(unused_variables)]
+#![allow(unused_mut)]
+#![allow(clippy::needless_return)]
+//
+
+//
 mod sdr;
 pub use sdr::{Idx, SDR};
 

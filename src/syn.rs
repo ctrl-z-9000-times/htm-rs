@@ -79,7 +79,7 @@ impl Synapses {
     fn sort_by_axon(&mut self) {
         if !self.syn_sorted_ && self.num_synapses() > 0 {
             // Sort the synapses by their presynaptic axon.
-            let mut argsort: Vec<_> = (0..self.num_synapses()).collect();
+            let mut argsort: Vec<_> = (0..self.num_synapses() as Idx).collect();
             argsort.sort_by_key(|&idx| self.syn_axons_[idx as usize]);
             self.syn_axons_ = argsort
                 .iter()
@@ -171,9 +171,9 @@ impl Synapses {
 
 impl std::fmt::Debug for Synapses {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
+        writeln!(
             f,
-            "Synapses (Axons: {}, Dendrites: {} Synapses: {})\n",
+            "Synapses (Axons: {}, Dendrites: {} Synapses: {})",
             self.num_axons(),
             self.num_dendrites(),
             self.num_synapses(),
