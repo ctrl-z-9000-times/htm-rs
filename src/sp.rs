@@ -2,90 +2,53 @@ use crate::{Idx, Synapses, SDR};
 use pyo3::prelude::*;
 
 #[pyclass]
-#[derive(Copy, Clone, Debug)]
-pub struct SpatialPoolerParameters {
-    #[pyo3(get, set)]
-    pub num_cells: usize,
-
-    #[pyo3(get, set)]
-    pub sparsity: f32,
-
-    #[pyo3(get, set)]
-    pub threshold: usize,
-
-    #[pyo3(get, set)]
-    pub potential_percent: f32,
-
-    #[pyo3(get, set)]
-    pub num_dendrites: usize,
-
-    #[pyo3(get, set)]
-    pub learning_period: f32,
-
-    #[pyo3(get, set)]
-    pub coincidence_ratio: f32,
-
-    #[pyo3(get, set)]
-    pub homeostatic_period: f32,
-
-    #[pyo3(get, set)]
-    pub stability_period: f32,
-
-    #[pyo3(get, set)]
-    pub fatigue_period: f32,
-}
-
-impl Default for SpatialPoolerParameters {
-    fn default() -> Self {
-        return Self {
-            num_cells: 2000,
-            sparsity: 0.02,
-            threshold: 10,
-            potential_percent: 0.5,
-            num_dendrites: 1,
-            learning_period: 10.0,
-            coincidence_ratio: 10.0,
-            homeostatic_period: 1000.0,
-            stability_period: 0.0,
-            fatigue_period: 0.0,
-        };
-    }
-}
-
-#[pymethods]
-impl SpatialPoolerParameters {
-    #[new]
-    fn new() -> Self {
-        return Self::default();
-    }
-
-    fn __str__(&self) -> String {
-        return format!("{:?}", self);
-    }
-}
-
-#[pyclass]
 pub struct SpatialPooler {
-    args: SpatialPoolerParameters,
+    num_cells: usize,
+    num_active: usize,
+    active_thresh: usize,
+    potential_pct: f32,
+    learning_period: f32,
+    coincidence_ratio: f32,
+    homeostatic_period: f32,
+
     syn: Synapses,
     af: Vec<f32>,
-    // Stability & fatigue state vectors.
 }
 
 #[pymethods]
 impl SpatialPooler {
     #[new]
-    pub fn new(parameters: SpatialPoolerParameters) -> Self {
-        let args = parameters;
+    // #[args()] // TODO: Make the python version pretty w/ default values.
+    fn new(
+        num_cells: usize,
+        num_active: usize,
+        active_thresh: usize,
+        potential_pct: f32,
+        learning_period: f32,
+        coincidence_ratio: f32,
+        homeostatic_period: f32,
+    ) -> Self {
         let mut syn = Synapses::default();
-        syn.add_dendrites(args.num_cells * args.num_dendrites);
-        let af = vec![args.sparsity; args.num_cells];
-        return Self { args, syn, af };
+        syn.add_dendrites(num_cells);
+        let sparsity = num_active as f32 / num_cells as f32;
+        return Self {
+            num_cells,
+            num_active,
+            active_thresh,
+            potential_pct,
+            learning_period,
+            coincidence_ratio,
+            homeostatic_period,
+            syn,
+            af: vec![sparsity; num_cells],
+        };
     }
 
-    #[pyo3(name = "parameters")]
-    fn py_parameters(&self) -> SpatialPoolerParameters {
-        return self.args;
+    fn __str__(&self) -> String {
+        return format!(
+            "SpatialPooler {{ num_cells: {}, num_active {} }}",
+            self.num_cells, self.num_active
+        );
     }
 
     pub fn reset(&mut self) {
@@ -98,7 +61,8 @@ impl SpatialPooler {
         let (connected, potential) = self.syn.activate(inputs);
 
         // Process the active synapse inputs into a general "activity"
-        let boost_factor_adjust = 1.0 / self.args.sparsity.log2();
+        let sparsity = self.num_active as f32 / self.num_cells as f32;
+        let boost_factor_adjust = 1.0 / sparsity.log2();
         let mut activity: Vec<_> = connected
             .iter()
             .zip(&self.syn.dend_num_connected_)
@@ -116,24 +80,23 @@ impl SpatialPooler {
             .collect();
 
         // Run the Winner-Takes-All Competition.
-        let num_active = (self.args.sparsity * self.args.num_cells as f32).round() as usize;
-        let mut sparse: Vec<_> = (0..self.args.num_cells as Idx).collect();
-        sparse.select_nth_unstable_by(num_active, |&x, &y| {
+        let mut sparse: Vec<_> = (0..self.num_cells as Idx).collect();
+        sparse.select_nth_unstable_by(self.num_active, |&x, &y| {
             cmp_f32(activity[x as usize], activity[y as usize]).reverse()
         });
-        sparse.resize(num_active, 0);
+        sparse.resize(self.num_active, 0);
 
         // Apply the activation threshold.
         let mut sparse: Vec<_> = sparse
             .into_iter()
-            .filter(|&cell| connected[cell as usize] > self.args.threshold as Idx)
+            .filter(|&cell| connected[cell as usize] > self.active_thresh as Idx)
             .collect();
 
         // Assign new cells to activate.
-        if learn && sparse.len() < num_active {
-            let num_new = num_active - sparse.len();
+        if learn && sparse.len() < self.num_active {
+            let num_new = self.num_active - sparse.len();
             // Select the cells with the lowest activation frequency.
-            let mut min_af: Vec<_> = (0..self.args.num_cells as Idx).collect();
+            let mut min_af: Vec<_> = (0..self.num_cells as Idx).collect();
             min_af.select_nth_unstable_by(num_new, |&x, &y| {
                 cmp_f32(self.af[x as usize], self.af[y as usize])
             });
@@ -141,7 +104,7 @@ impl SpatialPooler {
             sparse.append(&mut min_af);
         }
 
-        let mut activity = SDR::from_sparse(self.args.num_cells, sparse);
+        let mut activity = SDR::from_sparse(self.num_cells, sparse);
 
         if learn {
             self.learn(inputs, &mut activity);
@@ -153,41 +116,32 @@ impl SpatialPooler {
         self.lazy_init(inputs);
         self.update_af(activity);
         // Hebbian Learning.
-        let incr = 1.0 - (-1.0 / self.args.learning_period).exp();
-        let decr = -incr / self.args.coincidence_ratio;
+        let incr = 1.0 - (-1.0 / self.learning_period).exp();
+        let decr = -incr / self.coincidence_ratio;
         self.syn.hebbian(inputs, activity, incr, decr);
         // Grow new synapses.
-        let num_syn = (inputs.num_cells() as f32 * self.args.potential_percent).round() as usize;
+        let num_syn = (inputs.num_cells() as f32 * self.potential_pct).round() as usize;
         for &dend in activity.sparse() {
             let weights = vec![0.5; num_syn];
             // TODO: Randomize the synapse weights.
 
             // TODO: How to implement the potential pool?
             // Or some other way of limiting the synapse growth?
-            //     Potential pool is easy to impl: hash(axon & dend) < potential_percent
+            //     Potential pool is easy to impl: hash(axon & dend) < potential_pct
             self.syn.grow_synapses(inputs, dend, &weights);
         }
     }
 }
 
 impl SpatialPooler {
-    pub fn parameters(&self) -> &SpatialPoolerParameters {
-        &self.args
-    }
-
-    pub fn synapses(&self) -> &Synapses {
-        &self.syn
-    }
-
     fn lazy_init(&mut self, inputs: &mut SDR) {
-        if self.syn.num_axons() > 0 {
-            return;
+        if self.syn.num_axons() == 0 {
+            self.syn.add_axons(inputs.num_cells());
         }
-        self.syn.add_axons(inputs.num_cells());
     }
 
     fn update_af(&mut self, activity: &mut SDR) {
-        let alpha = (-1.0f32 / self.args.homeostatic_period).exp();
+        let alpha = (-1.0f32 / self.homeostatic_period).exp();
         let beta = 1.0 - alpha;
         for x in self.af.iter_mut() {
             *x *= alpha;
@@ -216,7 +170,7 @@ mod tests {
 
     #[test]
     fn basic() {
-        let mut sp = SpatialPooler::new(SpatialPoolerParameters::default());
+        let mut sp = SpatialPooler::new();
         // Start with some random initial synapses.
         for _ in 0..100 {
             sp.advance(&mut SDR::random(500, 0.1), true);

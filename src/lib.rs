@@ -12,7 +12,7 @@ mod syn;
 pub use syn::Synapses;
 
 mod sp;
-pub use sp::{SpatialPooler, SpatialPoolerParameters};
+pub use sp::SpatialPooler;
 
 // mod tm;
 // pub use tm::TemporalMemory;
@@ -24,7 +24,6 @@ use pyo3::prelude::*;
 fn htm_rs(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<SDR>()?;
     m.add_class::<Stats>()?;
-    m.add_class::<SpatialPoolerParameters>()?;
     m.add_class::<SpatialPooler>()?;
 
     Ok(())

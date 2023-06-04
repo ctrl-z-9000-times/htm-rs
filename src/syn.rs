@@ -2,6 +2,8 @@ use crate::{Idx, SDR};
 use rand::prelude::*;
 use std::ops::Range;
 
+// TODO: Make the connected threshold into an argument?
+
 #[derive(Default)]
 pub struct Synapses {
     // Parallel arrays of synapse data.
@@ -64,8 +66,8 @@ impl Synapses {
 
     /// Randomly sample the active axons.
     pub fn grow_synapses(&mut self, axons: &mut SDR, dendrite: Idx, weights: &[f32]) {
-        debug_assert!(axons.num_cells() == self.num_axons());
-        debug_assert!(dendrite < self.num_dendrites() as Idx);
+        assert!(axons.num_cells() == self.num_axons());
+        assert!(dendrite < self.num_dendrites() as Idx);
         let mut rng = rand::thread_rng();
         let index = axons.sparse();
         let num_grow = weights.len().min(index.len());
