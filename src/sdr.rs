@@ -1,13 +1,8 @@
 use bitvec::prelude::*;
 use pyo3::prelude::*;
+use pyo3::types::PyTuple;
 use rand::prelude::SliceRandom;
-
-// NOTES: I'd like to make SDR's immutable so that I don't need to keep writing
-// out "mut" everywhere. This should be doable with a RefCell lock on the whole
-// structure? Or I could premptively calc both representations at construction.
-
-// TODO: Make SDR::from_sparse() and SDR::from_dense() accept anything that can
-// be coerced into an iterable.
+use std::ops::DerefMut;
 
 pub type Idx = u32;
 
@@ -32,7 +27,7 @@ impl SDR {
 
     #[staticmethod]
     pub fn ones(num_cells: usize) -> Self {
-        return Self::from_dense(&vec![true; num_cells]);
+        return Self::from_dense(vec![true; num_cells]);
     }
 
     #[staticmethod]
@@ -62,6 +57,10 @@ impl SDR {
         }
     }
 
+    fn __str__(&self) -> String {
+        return format!("{:?}", self);
+    }
+
     #[staticmethod]
     pub fn from_sparse(num_cells: usize, mut index: Vec<Idx>) -> Self {
         index.sort();
@@ -76,6 +75,20 @@ impl SDR {
         };
     }
 
+    #[staticmethod]
+    pub fn from_dense(dense: Vec<bool>) -> Self {
+        let num_cells = dense.len();
+        let mut bits = BitVec::with_capacity(num_cells);
+        for x in &dense {
+            bits.push(*x)
+        }
+        return Self {
+            num_cells_: num_cells.try_into().unwrap(),
+            sparse_: None,
+            dense_: Some(bits.into_boxed_bitslice()),
+        };
+    }
+
     #[pyo3(name = "sparse")]
     fn py_sparse(&mut self) -> Vec<Idx> {
         return self.sparse().clone();
@@ -84,6 +97,14 @@ impl SDR {
     #[pyo3(name = "dense")]
     fn py_dense(&mut self) -> Vec<bool> {
         return self.dense().iter().map(|x| *x).collect();
+    }
+
+    fn clone(&mut self) -> Self {
+        return Self {
+            num_cells_: self.num_cells_,
+            sparse_: Some(self.sparse().clone()),
+            dense_: None,
+        };
     }
 
     pub fn overlap(&mut self, other: &mut Self) -> usize {
@@ -140,6 +161,17 @@ impl SDR {
         }
         return Self::from_sparse(self.num_cells(), corrupted);
     }
+
+    #[staticmethod]
+    #[args(sdrs = "*")]
+    fn py_concatenate(sdrs: &PyTuple) -> Self {
+        let mut sdrs: Vec<PyRefMut<SDR>> = sdrs
+            .iter()
+            .map(|arg: &PyAny| arg.extract().unwrap())
+            .collect();
+        let mut sdrs: Vec<&mut SDR> = sdrs.iter_mut().map(|arg| arg.deref_mut()).collect();
+        return SDR::concatenate(sdrs.as_mut_slice());
+    }
 }
 
 impl SDR {
@@ -165,18 +197,6 @@ impl SDR {
         return self.sparse_.unwrap();
     }
 
-    pub fn from_dense(dense: &[bool]) -> Self {
-        let mut bits = BitVec::with_capacity(dense.len());
-        for x in dense {
-            bits.push(*x)
-        }
-        return Self {
-            num_cells_: dense.len().try_into().unwrap(),
-            sparse_: None,
-            dense_: Some(bits.into_boxed_bitslice()),
-        };
-    }
-
     /// Get a read-only view of this SDR's data.
     pub fn dense(&mut self) -> &BitBox {
         if self.dense_.is_none() {
@@ -197,7 +217,7 @@ impl SDR {
         return self.dense_.unwrap();
     }
 
-    pub fn concatenate(sdrs: &mut [SDR]) -> Self {
+    pub fn concatenate(sdrs: &mut [&mut SDR]) -> Self {
         let num_cells = sdrs.iter().map(|x| x.num_cells()).sum::<usize>();
         let num_active = sdrs.iter_mut().map(|x| x.num_active()).sum();
 
@@ -282,6 +302,11 @@ impl Stats {
         todo!()
     }
 
+    fn __str__(&self) -> String {
+        todo!()
+        // return format!("{:?}", self);
+    }
+
     pub fn min_sparsity(&self) -> f32 {
         return self.min_sparsity_;
     }
@@ -342,6 +367,7 @@ mod tests {
         let mut b = SDR::ones(33);
         assert_eq!(b.num_cells(), 33);
         assert_eq!(b.sparsity(), 1.0);
+        assert_eq!(b.clone().sparse(), b.sparse());
 
         let z = SDR::zeros(0);
         let z = SDR::ones(0);
@@ -349,7 +375,7 @@ mod tests {
 
     #[test]
     fn convert() {
-        let mut a = SDR::from_dense(&vec![false, true, false, true, false, true]);
+        let mut a = SDR::from_dense(vec![false, true, false, true, false, true]);
         assert_eq!(a.sparse(), &[1, 3, 5]);
 
         let mut b = SDR::zeros(3);
@@ -390,7 +416,7 @@ mod tests {
         let mut a = SDR::from_sparse(10, vec![3, 4, 5]);
         let mut b = SDR::from_sparse(10, vec![3, 4, 5]);
         let mut c = SDR::from_sparse(10, vec![3, 4, 5]);
-        let mut d = SDR::concatenate(&mut [a, b, c]);
+        let mut d = SDR::concatenate(&mut [&mut a, &mut b, &mut c]);
         assert_eq!(d.num_cells(), 30);
         assert_eq!(d.sparse(), &[3, 4, 5, 13, 14, 15, 23, 24, 25]);
     }

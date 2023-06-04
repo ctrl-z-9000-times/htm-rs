@@ -203,7 +203,7 @@ mod tests {
         x.add_axons(2);
         x.add_dendrites(1);
         x.grow_synapses(&mut SDR::ones(2), 0, &[0.5, 0.5]);
-        let mut pattern = SDR::from_dense(&[false, true]);
+        let mut pattern = SDR::from_dense(vec![false, true]);
         x.hebbian(&mut pattern, &mut SDR::ones(1), 0.1, -0.1);
         let (pot, con) = x.activate(&mut SDR::ones(2));
         assert_eq!(pot, [2]);
