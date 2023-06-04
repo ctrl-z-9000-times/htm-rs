@@ -140,7 +140,7 @@ impl SDR {
 
     pub fn corrupt(&mut self, percent_noise: f32) -> Self {
         let index = self.sparse().clone();
-        // todo!();
+        todo!();
         Self::from_sparse(self.num_cells(), index)
     }
 
@@ -170,7 +170,11 @@ impl SDR {
 
 impl std::fmt::Debug for SDR {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SDR({})\n", self.num_cells(),)
+        if let Some(sparse) = &self.sparse_ {
+            write!(f, "SDR({}, nact={})\n", self.num_cells(), sparse.len())
+        } else {
+            write!(f, "SDR({})\n", self.num_cells(),)
+        }
     }
 }
 

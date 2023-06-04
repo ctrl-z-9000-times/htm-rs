@@ -15,7 +15,7 @@ pub struct Synapses {
 
     // Parallel arrays of dendrite data.
     dend_synapses_: Vec<Vec<Idx>>,
-    dend_num_connected_: Vec<Idx>,
+    pub dend_num_connected_: Vec<Idx>,
 }
 
 impl Synapses {
