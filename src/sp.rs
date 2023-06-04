@@ -1,64 +1,91 @@
 use crate::{Idx, Synapses, SDR};
+use pyo3::prelude::*;
 
-pub struct Parameters {
+#[pyclass]
+#[derive(Copy, Clone, Debug)]
+pub struct SpatialPoolerParameters {
+    #[pyo3(get, set)]
     pub num_cells: usize,
+
+    #[pyo3(get, set)]
     pub sparsity: f32,
+
+    #[pyo3(get, set)]
     pub threshold: usize,
+
+    #[pyo3(get, set)]
     pub potential_percent: f32,
+
+    #[pyo3(get, set)]
     pub num_dendrites: usize,
+
+    #[pyo3(get, set)]
     pub learning_period: f32,
+
+    #[pyo3(get, set)]
     pub coincidence_ratio: f32,
+
+    #[pyo3(get, set)]
     pub homeostatic_period: f32,
+
+    #[pyo3(get, set)]
     pub stability_period: f32,
+
+    #[pyo3(get, set)]
     pub fatigue_period: f32,
 }
 
-impl Default for Parameters {
+impl Default for SpatialPoolerParameters {
     fn default() -> Self {
-        Self {
+        return Self {
             num_cells: 2000,
             sparsity: 0.02,
             threshold: 10,
             potential_percent: 0.5,
             num_dendrites: 1,
-            learning_period: 0.02,
-            coincidence_ratio: 0.005,
+            learning_period: 10.0,
+            coincidence_ratio: 10.0,
             homeostatic_period: 1000.0,
             stability_period: 0.0,
             fatigue_period: 0.0,
-        }
+        };
     }
 }
 
+#[pymethods]
+impl SpatialPoolerParameters {
+    #[new]
+    fn new() -> Self {
+        return Self::default();
+    }
+
+    fn __str__(&self) -> String {
+        return format!("{:?}", self);
+    }
+}
+
+#[pyclass]
 pub struct SpatialPooler {
-    args: Parameters,
+    args: SpatialPoolerParameters,
     syn: Synapses,
     af: Vec<f32>,
     // Stability & fatigue state vectors.
 }
 
+#[pymethods]
 impl SpatialPooler {
-    pub fn parameters(&self) -> &Parameters {
-        &self.args
-    }
-
-    pub fn synapses(&self) -> &Synapses {
-        &self.syn
-    }
-
-    pub fn new(parameters: Parameters) -> Self {
+    #[new]
+    pub fn new(parameters: SpatialPoolerParameters) -> Self {
         let args = parameters;
         let mut syn = Synapses::default();
         syn.add_dendrites(args.num_cells * args.num_dendrites);
         let af = vec![args.sparsity; args.num_cells];
-        Self { args, syn, af }
+        return Self { args, syn, af };
     }
 
-    fn lazy_init(&mut self, inputs: &mut SDR) {
-        if self.syn.num_axons() > 0 {
-            return;
-        }
-        self.syn.add_axons(inputs.num_cells());
+    #[pyo3(name = "parameters")]
+    fn py_parameters(&self) -> SpatialPoolerParameters {
+        return self.args;
     }
 
     pub fn reset(&mut self) {
@@ -78,7 +105,7 @@ impl SpatialPooler {
             .zip(&self.af)
             .map(|((&x, &nsyn), &af)| {
                 if nsyn == 0 {
-                    f32::INFINITY
+                    0.0 // Zero div Zero is Zero.
                 } else {
                     // Normalize the activity by the number of connected synapses.
                     let x = (x as f32) / (nsyn as f32);
@@ -141,6 +168,23 @@ impl SpatialPooler {
             self.syn.grow_synapses(inputs, dend, &weights);
         }
     }
+}
+
+impl SpatialPooler {
+    pub fn parameters(&self) -> &SpatialPoolerParameters {
+        &self.args
+    }
+
+    pub fn synapses(&self) -> &Synapses {
+        &self.syn
+    }
+
+    fn lazy_init(&mut self, inputs: &mut SDR) {
+        if self.syn.num_axons() > 0 {
+            return;
+        }
+        self.syn.add_axons(inputs.num_cells());
+    }
 
     fn update_af(&mut self, activity: &mut SDR) {
         let alpha = (-1.0f32 / self.args.homeostatic_period).exp();
@@ -172,7 +216,7 @@ mod tests {
 
     #[test]
     fn basic() {
-        let mut sp = SpatialPooler::new(Parameters::default());
+        let mut sp = SpatialPooler::new(SpatialPoolerParameters::default());
         // Start with some random initial synapses.
         for _ in 0..100 {
             sp.advance(&mut SDR::random(500, 0.1), true);

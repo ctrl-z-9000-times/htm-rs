@@ -3,7 +3,15 @@ name = "htm-rs"
 version = "0.0.1"
 edition = "2021"
 
+[lib]
+name = "htm_rs"
+crate-type = ["rlib", "cdylib"]
+
 [dependencies]
-bitvec = "1.0.1"
+bitvec = "1.0"
 ndarray = "0.15"
 rand = "0.8"
+
+[dependencies.pyo3]
+version = "0.15"
+features = ["extension-module"]

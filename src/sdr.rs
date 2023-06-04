@@ -1,4 +1,5 @@
 use bitvec::prelude::*;
+use pyo3::prelude::*;
 use rand::prelude::SliceRandom;
 
 // NOTES: I'd like to make SDR's immutable so that I don't need to keep writing
@@ -11,13 +12,16 @@ use rand::prelude::SliceRandom;
 pub type Idx = u32;
 
 /// Sparse Distributed Representation
+#[pyclass]
 pub struct SDR {
     num_cells_: Idx,
     sparse_: Option<Vec<Idx>>,
     dense_: Option<BitBox>,
 }
 
+#[pymethods]
 impl SDR {
+    #[staticmethod]
     pub fn zeros(num_cells: usize) -> Self {
         return Self {
             num_cells_: num_cells.try_into().unwrap(),
@@ -26,10 +30,12 @@ impl SDR {
         };
     }
 
+    #[staticmethod]
     pub fn ones(num_cells: usize) -> Self {
         return Self::from_dense(&vec![true; num_cells]);
     }
 
+    #[staticmethod]
     pub fn random(num_cells: usize, sparsity: f32) -> Self {
         let mut rng = rand::thread_rng();
         let num_active = (num_cells as f32 * sparsity).round() as usize;
@@ -56,12 +62,12 @@ impl SDR {
         }
     }
 
+    #[staticmethod]
     pub fn from_sparse(num_cells: usize, mut index: Vec<Idx>) -> Self {
         index.sort();
         index.dedup();
         if let Some(last) = index.last() {
-            let last = *last as usize;
-            assert!(last < num_cells);
+            assert!((*last as usize) < num_cells);
         }
         return Self {
             num_cells_: num_cells.try_into().unwrap(),
@@ -70,58 +76,14 @@ impl SDR {
         };
     }
 
-    /// Get a read-only view of this SDR's data.
-    pub fn sparse(&mut self) -> &Vec<Idx> {
-        if self.sparse_.is_none() {
-            let mut index = vec![];
-            if let Some(d) = &self.dense_ {
-                for (i, x) in d.iter().enumerate() {
-                    if *x {
-                        index.push(i as Idx);
-                    }
-                }
-            }
-            self.sparse_ = Some(index);
-        }
-        return self.sparse_.as_ref().unwrap();
+    #[pyo3(name = "sparse")]
+    fn py_sparse(&mut self) -> Vec<Idx> {
+        return self.sparse().clone();
     }
 
-    /// Consume this SDR and return its sparse formatted data.
-    pub fn sparse_mut(mut self) -> Vec<Idx> {
-        self.sparse();
-        return self.sparse_.unwrap();
-    }
-
-    pub fn from_dense(dense: &[bool]) -> Self {
-        let mut bits = BitVec::with_capacity(dense.len());
-        for x in dense {
-            bits.push(*x)
-        }
-        return Self {
-            num_cells_: dense.len().try_into().unwrap(),
-            sparse_: None,
-            dense_: Some(bits.into_boxed_bitslice()),
-        };
-    }
-
-    /// Get a read-only view of this SDR's data.
-    pub fn dense(&mut self) -> &BitBox {
-        if self.dense_.is_none() {
-            let mut bits = bitvec![0; self.num_cells()];
-            if let Some(index) = &self.sparse_ {
-                for i in index.iter() {
-                    bits.set(*i as usize, true);
-                }
-            }
-            self.dense_ = Some(bits.into_boxed_bitslice());
-        }
-        return self.dense_.as_ref().unwrap();
-    }
-
-    /// Consume this SDR and return its dense formatted data.
-    pub fn dense_mut(mut self) -> BitBox {
-        self.dense();
-        return self.dense_.unwrap();
+    #[pyo3(name = "dense")]
+    fn py_dense(&mut self) -> Vec<bool> {
+        return self.dense().iter().map(|x| *x).collect();
     }
 
     pub fn overlap(&mut self, other: &mut Self) -> usize {
@@ -178,9 +140,65 @@ impl SDR {
         }
         return Self::from_sparse(self.num_cells(), corrupted);
     }
+}
+
+impl SDR {
+    /// Get a read-only view of this SDR's data.
+    pub fn sparse(&mut self) -> &Vec<Idx> {
+        if self.sparse_.is_none() {
+            let mut index = vec![];
+            if let Some(d) = &self.dense_ {
+                for (i, x) in d.iter().enumerate() {
+                    if *x {
+                        index.push(i as Idx);
+                    }
+                }
+            }
+            self.sparse_ = Some(index);
+        }
+        return self.sparse_.as_ref().unwrap();
+    }
+
+    /// Consume this SDR and return its sparse formatted data.
+    pub fn sparse_mut(mut self) -> Vec<Idx> {
+        self.sparse();
+        return self.sparse_.unwrap();
+    }
+
+    pub fn from_dense(dense: &[bool]) -> Self {
+        let mut bits = BitVec::with_capacity(dense.len());
+        for x in dense {
+            bits.push(*x)
+        }
+        return Self {
+            num_cells_: dense.len().try_into().unwrap(),
+            sparse_: None,
+            dense_: Some(bits.into_boxed_bitslice()),
+        };
+    }
+
+    /// Get a read-only view of this SDR's data.
+    pub fn dense(&mut self) -> &BitBox {
+        if self.dense_.is_none() {
+            let mut bits = bitvec![0; self.num_cells()];
+            if let Some(index) = &self.sparse_ {
+                for i in index.iter() {
+                    bits.set(*i as usize, true);
+                }
+            }
+            self.dense_ = Some(bits.into_boxed_bitslice());
+        }
+        return self.dense_.as_ref().unwrap();
+    }
+
+    /// Consume this SDR and return its dense formatted data.
+    pub fn dense_mut(mut self) -> BitBox {
+        self.dense();
+        return self.dense_.unwrap();
+    }
 
     pub fn concatenate(sdrs: &mut [SDR]) -> Self {
-        let num_cells = sdrs.iter().map(|x| x.num_cells()).sum();
+        let num_cells = sdrs.iter().map(|x| x.num_cells()).sum::<usize>();
         let num_active = sdrs.iter_mut().map(|x| x.num_active()).sum();
 
         let mut sparse = Vec::with_capacity(num_active);
@@ -191,7 +209,11 @@ impl SDR {
             }
             offset += x.num_cells() as Idx;
         }
-        return Self::from_sparse(num_cells, sparse);
+        return Self {
+            num_cells_: num_cells.try_into().unwrap(),
+            sparse_: Some(sparse),
+            dense_: None,
+        };
     }
 
     pub fn union(sdrs: &mut [SDR]) -> Self {
@@ -210,6 +232,100 @@ impl std::fmt::Debug for SDR {
         } else {
             writeln!(f, "SDR({})", self.num_cells(),)
         }
+    }
+}
+
+///
+#[pyclass]
+pub struct Stats {
+    num_cells_: Idx,
+    num_samples_: usize,
+
+    min_sparsity_: f32,
+    max_sparsity_: f32,
+    mean_sparsity_: f32,
+    var_sparsity_: f32,
+
+    af_: Box<[f32]>,
+
+    min_overlap_: f32,
+    max_overlap_: f32,
+    mean_overlap_: f32,
+    var_overlap_: f32,
+}
+
+#[pymethods]
+impl Stats {
+    #[new]
+    pub fn new(num_cells: usize, period: f32) -> Self {
+        return Stats {
+            num_cells_: num_cells as Idx,
+            num_samples_: 0,
+            min_sparsity_: f32::NAN,
+            max_sparsity_: f32::NAN,
+            mean_sparsity_: 0.0,
+            var_sparsity_: 0.0,
+            af_: vec![0.0; num_cells].into_boxed_slice(),
+            min_overlap_: f32::NAN,
+            max_overlap_: f32::NAN,
+            mean_overlap_: 0.0,
+            var_overlap_: 0.0,
+        };
+    }
+
+    pub fn add_sdr(&mut self, sdr: &mut SDR) {
+        self.num_samples_ += 1;
+        todo!()
+    }
+
+    pub fn reset(&mut self) {
+        todo!()
+    }
+
+    pub fn min_sparsity(&self) -> f32 {
+        return self.min_sparsity_;
+    }
+    pub fn max_sparsity(&self) -> f32 {
+        return self.max_sparsity_;
+    }
+    pub fn mean_sparsity(&self) -> f32 {
+        return self.mean_sparsity_;
+    }
+    pub fn std_sparsity(&self) -> f32 {
+        return self.var_sparsity_.sqrt();
+    }
+    pub fn min_frequency(&self) -> f32 {
+        return todo!();
+    }
+    pub fn max_frequency(&self) -> f32 {
+        return todo!();
+    }
+    pub fn mean_frequency(&self) -> f32 {
+        return todo!();
+    }
+    pub fn std_frequency(&self) -> f32 {
+        return todo!();
+    }
+    pub fn binary_entropy(&self) -> f32 {
+        return todo!();
+    }
+    pub fn min_overlap(&self) -> f32 {
+        return self.min_overlap_;
+    }
+    pub fn max_overlap(&self) -> f32 {
+        return self.max_overlap_;
+    }
+    pub fn mean_overlap(&self) -> f32 {
+        return self.mean_overlap_;
+    }
+    pub fn std_overlap(&self) -> f32 {
+        return self.var_overlap_.sqrt();
+    }
+}
+
+impl std::fmt::Debug for Stats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
     }
 }
 
@@ -286,6 +402,11 @@ mod tests {
 
     #[test]
     fn test_intersection() {
+        todo!();
+    }
+
+    #[test]
+    fn test_metrics() {
         todo!();
     }
 }
