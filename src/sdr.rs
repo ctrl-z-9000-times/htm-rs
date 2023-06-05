@@ -241,9 +241,9 @@ impl SDR {
 impl std::fmt::Debug for SDR {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(sparse) = &self.sparse_ {
-            writeln!(f, "SDR({}, nact={})", self.num_cells(), sparse.len())
+            write!(f, "SDR({}, nact={})", self.num_cells(), sparse.len())
         } else {
-            writeln!(f, "SDR({})", self.num_cells(),)
+            write!(f, "SDR({})", self.num_cells(),)
         }
     }
 }
@@ -253,13 +253,16 @@ impl std::fmt::Debug for SDR {
 pub struct Stats {
     num_cells_: Idx,
     num_samples_: usize,
+    period_: f32,
+
+    frequencies_: Vec<f32>,
 
     min_sparsity_: f32,
     max_sparsity_: f32,
     mean_sparsity_: f32,
     var_sparsity_: f32,
 
-    af_: Box<[f32]>,
+    previous_sdr_: SDR,
 
     min_overlap_: f32,
     max_overlap_: f32,
@@ -274,32 +277,68 @@ impl Stats {
         return Stats {
             num_cells_: num_cells as Idx,
             num_samples_: 0,
+            period_: period,
+            frequencies_: vec![0.0; num_cells],
             min_sparsity_: f32::NAN,
             max_sparsity_: f32::NAN,
-            mean_sparsity_: 0.0,
-            var_sparsity_: 0.0,
-            af_: vec![0.0; num_cells].into_boxed_slice(),
+            mean_sparsity_: f32::NAN,
+            var_sparsity_: f32::NAN,
+            previous_sdr_: SDR::zeros(num_cells),
             min_overlap_: f32::NAN,
             max_overlap_: f32::NAN,
-            mean_overlap_: 0.0,
-            var_overlap_: 0.0,
+            mean_overlap_: f32::NAN,
+            var_overlap_: f32::NAN,
         };
     }
 
     pub fn add_sdr(&mut self, sdr: &mut SDR) {
+        if self.num_samples_ == 0 {
+            self.mean_sparsity_ = 0.0;
+            self.var_sparsity_ = 0.0;
+            self.mean_overlap_ = 0.0;
+            self.var_overlap_ = 0.0;
+        }
+        let alpha = (-self.period_.min(self.num_samples_ as f32)).exp();
+        let decay = 1.0 - alpha;
         self.num_samples_ += 1;
-        todo!()
+
+        // Update the activation frequency data.
+        for frq in &mut self.frequencies_ {
+            *frq *= decay;
+        }
+        for &active in sdr.sparse() {
+            self.frequencies_[active as usize] += alpha;
+        }
+
+        // Update the sparsity statistics.
+        let sparsity = sdr.sparsity();
+        self.min_sparsity_ = self.min_sparsity_.min(sparsity);
+        self.max_sparsity_ = self.max_sparsity_.max(sparsity);
+        // http://people.ds.cam.ac.uk/fanf2/hermes/doc/antiforgery/stats.pdf
+        // See section 9.
+        let diff = sparsity - self.mean_sparsity_;
+        let incr = alpha * diff;
+        self.mean_sparsity_ += incr;
+        self.var_sparsity_ = decay * (self.var_sparsity_ + diff * incr);
+
+        // Update the sequential overlap statistics.
+        let overlap = sdr.percent_overlap(&mut self.previous_sdr_);
+        self.previous_sdr_ = sdr.clone();
+        self.min_overlap_ = self.min_overlap_.min(overlap);
+        self.max_overlap_ = self.max_overlap_.max(overlap);
+        let diff = overlap - self.mean_overlap_;
+        let incr = alpha * diff;
+        self.mean_overlap_ += incr;
+        self.var_overlap_ = decay * (self.var_overlap_ + diff * incr);
     }
 
     pub fn reset(&mut self) {
-        todo!()
+        self.previous_sdr_ = SDR::zeros(self.num_cells());
     }
 
-    fn __str__(&self) -> String {
-        todo!()
-        // return format!("{:?}", self);
+    pub fn num_cells(&self) -> usize {
+        return self.num_cells_ as usize;
     }
-
     pub fn min_sparsity(&self) -> f32 {
         return self.min_sparsity_;
     }
@@ -313,19 +352,38 @@ impl Stats {
         return self.var_sparsity_.sqrt();
     }
     pub fn min_frequency(&self) -> f32 {
-        return todo!();
+        return self.frequencies_.iter().fold(f32::NAN, |a, &b| a.min(b));
     }
     pub fn max_frequency(&self) -> f32 {
-        return todo!();
+        return self.frequencies_.iter().fold(f32::NAN, |a, &b| a.max(b));
     }
     pub fn mean_frequency(&self) -> f32 {
-        return todo!();
+        if self.num_samples_ == 0 {
+            return f32::NAN;
+        } else {
+            return self.frequencies_.iter().sum::<f32>() / self.num_cells_ as f32;
+        }
     }
     pub fn std_frequency(&self) -> f32 {
-        return todo!();
+        if self.num_samples_ == 0 {
+            return f32::NAN;
+        } else {
+            let mean = self.mean_frequency();
+            return self
+                .frequencies_
+                .iter()
+                .map(|&x| (x - mean).powi(2))
+                .sum::<f32>()
+                / self.num_cells_ as f32;
+        }
     }
-    pub fn binary_entropy(&self) -> f32 {
-        return todo!();
+    pub fn entropy(&self) -> f32 {
+        let max_extropy = Stats::binary_entropy(&[self.mean_frequency()]);
+        if max_extropy == 0.0 {
+            return 0.0;
+        } else {
+            return Stats::binary_entropy(&self.frequencies_) / max_extropy;
+        }
     }
     pub fn min_overlap(&self) -> f32 {
         return self.min_overlap_;
@@ -339,11 +397,58 @@ impl Stats {
     pub fn std_overlap(&self) -> f32 {
         return self.var_overlap_.sqrt();
     }
+    fn __str__(&self) -> String {
+        return format!("{:?}", self);
+    }
+}
+
+impl Stats {
+    fn binary_entropy(data: &[f32]) -> f32 {
+        return data
+            .iter()
+            .map(|p| {
+                let p_ = 1.0 - p;
+                let e = -p * p.log2() - p_ * p_.log2();
+                if e.is_nan() {
+                    0.0
+                } else {
+                    e
+                }
+            })
+            .sum::<f32>()
+            / data.len() as f32;
+    }
 }
 
 impl std::fmt::Debug for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        writeln!(f, "SDR({})", self.num_cells(),)?;
+        writeln!(f, "           |  min  |  max  |  mean |  std  |",)?;
+        writeln!(
+            f,
+            "Sparsity   | {:.3} | {:.3} | {:.3} | {:.3} |",
+            self.min_sparsity(),
+            self.max_sparsity(),
+            self.mean_sparsity(),
+            self.std_sparsity()
+        )?;
+        writeln!(
+            f,
+            "Frequency  | {:.3} | {:.3} | {:.3} | {:.3} |",
+            self.min_frequency(),
+            self.max_frequency(),
+            self.mean_frequency(),
+            self.std_frequency()
+        )?;
+        writeln!(
+            f,
+            "Overlap    | {:.3} | {:.3} | {:.3} | {:.3} |",
+            self.min_overlap(),
+            self.max_overlap(),
+            self.mean_overlap(),
+            self.std_overlap()
+        )?;
+        writeln!(f, "Entropy: {:.1}%", (self.entropy() * 100.0))
     }
 }
 
@@ -421,11 +526,6 @@ mod tests {
 
     #[test]
     fn test_intersection() {
-        todo!();
-    }
-
-    #[test]
-    fn test_metrics() {
         todo!();
     }
 }

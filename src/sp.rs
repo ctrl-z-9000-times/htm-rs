@@ -138,11 +138,11 @@ impl SpatialPooler {
     fn update_af(&mut self, activity: &mut SDR) {
         let alpha = (-1.0f32 / self.homeostatic_period).exp();
         let beta = 1.0 - alpha;
-        for x in self.af.iter_mut() {
-            *x *= alpha;
-        }
         for i in activity.sparse() {
             self.af[*i as usize] += beta;
+        }
+        for x in self.af.iter_mut() {
+            *x *= alpha;
         }
     }
 }
@@ -167,13 +167,13 @@ mod tests {
     fn basic() {
         let make_sdr = || SDR::random(1000, 0.1);
         let mut sp = SpatialPooler::new(
-            2000,   // num_cells
-            40,     // num_active
-            10,     // active_thresh
-            0.5,    // potential_pct
-            10.0,   // learning_period
-            10.0,   // coincidence_ratio
-            1000.0, // homeostatic_period
+            2000,  // num_cells
+            40,    // num_active
+            10,    // active_thresh
+            0.5,   // potential_pct
+            10.0,  // learning_period
+            10.0,  // coincidence_ratio
+            100.0, // homeostatic_period
         );
         sp.reset();
         dbg!(&sp.syn);
