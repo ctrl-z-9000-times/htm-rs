@@ -8,6 +8,7 @@ pub type Idx = u32;
 
 /// Sparse Distributed Representation
 #[pyclass]
+#[derive(Clone)]
 pub struct SDR {
     num_cells_: Idx,
     sparse_: Option<Vec<Idx>>,
@@ -97,14 +98,6 @@ impl SDR {
     #[pyo3(name = "dense")]
     fn py_dense(&mut self) -> Vec<bool> {
         return self.dense().iter().map(|x| *x).collect();
-    }
-
-    fn clone(&mut self) -> Self {
-        return Self {
-            num_cells_: self.num_cells_,
-            sparse_: Some(self.sparse().clone()),
-            dense_: None,
-        };
     }
 
     pub fn overlap(&mut self, other: &mut Self) -> usize {

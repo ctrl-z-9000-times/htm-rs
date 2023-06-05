@@ -74,7 +74,8 @@ impl SpatialPooler {
                     // Normalize the activity by the number of connected synapses.
                     let x = (x as f32) / (nsyn as f32);
                     // Apply homeostatic control based on the cell activation frequency.
-                    x * af.log2() * boost_factor_adjust
+                    let x = x * af.log2() * boost_factor_adjust;
+                    x
                 }
             })
             .collect();
@@ -164,24 +165,27 @@ mod tests {
 
     #[test]
     fn basic() {
+        let make_sdr = || SDR::random(1000, 0.1);
         let mut sp = SpatialPooler::new(
-            2000,  // num_cells
-            40,    // num_active
-            10,    // active_thresh
-            0.2,   // potential_pct
-            10.0,  // learning_period
-            10.0,  // coincidence_ratio
-            100.0, // homeostatic_period
+            2000,   // num_cells
+            40,     // num_active
+            10,     // active_thresh
+            0.5,    // potential_pct
+            10.0,   // learning_period
+            10.0,   // coincidence_ratio
+            1000.0, // homeostatic_period
         );
-        // Start with some random initial synapses.
-        for _ in 0..100 {
-            sp.advance(&mut SDR::random(500, 0.1), true);
-        }
         sp.reset();
         dbg!(&sp.syn);
         //
-        let mut inp1 = SDR::random(500, 0.1);
+        let mut inp1 = make_sdr();
+        for _train in 0..10 {
+            sp.advance(&mut inp1, true);
+        }
+        let mut a1 = sp.advance(&mut inp1, true);
         let mut a = sp.advance(&mut inp1, true);
+        dbg!(a1.percent_overlap(&mut a));
+        assert_eq!(a1.sparse(), a.sparse());
 
         // Test that similar SDRs yield similar outputs.
         for _trial in 0..10 {
@@ -192,7 +196,7 @@ mod tests {
 
         // Test that dissimilar SDRs yeild dissimilar outputs.
         for _trial in 0..10 {
-            let mut inp3 = SDR::random(500, 0.1);
+            let mut inp3 = make_sdr();
             let mut c = sp.advance(&mut inp3, true);
             assert!(a.percent_overlap(&mut c) < 0.5);
         }
