@@ -1,140 +1,240 @@
 use crate::{Idx, SDR};
 use rand::prelude::*;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::ops::Range;
 
 // TODO: Make the connected threshold into an argument?
 
-#[derive(Default)]
 pub struct Synapses {
+    clean_: bool,
+    seed_: u64,
+
+    num_syn_: Idx,
+    num_axn_: Idx,
+    num_den_: Idx,
+
     // Parallel arrays of synapse data.
     syn_axons_: Vec<Idx>,
     syn_dendrites_: Vec<Idx>,
     syn_permanences_: Vec<f32>,
-    syn_sorted_: bool,
 
     // Parallel arrays of axon data.
-    axon_syn_ranges_: Vec<Range<Idx>>,
+    axn_syn_ranges_: Vec<Range<Idx>>,
 
     // Parallel arrays of dendrite data.
-    dend_synapses_: Vec<Vec<Idx>>,
-    pub dend_num_connected_: Vec<Idx>,
+    den_synapses_: Vec<Vec<Idx>>,
+    den_num_connected_: Vec<Idx>,
 }
 
 impl Synapses {
+    pub fn new() -> Self {
+        return Self {
+            clean_: false,
+            seed_: 42,
+            num_syn_: 0,
+            num_axn_: 0,
+            num_den_: 0,
+            syn_axons_: vec![],
+            syn_dendrites_: vec![],
+            syn_permanences_: vec![],
+            axn_syn_ranges_: vec![],
+            den_synapses_: vec![],
+            den_num_connected_: vec![],
+        };
+    }
+
     pub fn num_axons(&self) -> usize {
-        return self.axon_syn_ranges_.len();
+        return self.num_axn_ as usize;
     }
 
     pub fn num_dendrites(&self) -> usize {
-        return self.dend_synapses_.len();
+        return self.num_den_ as usize;
     }
 
     pub fn num_synapses(&self) -> usize {
-        return self.syn_axons_.len();
+        return self.num_syn_ as usize;
     }
 
     pub fn add_axons(&mut self, num_axons: usize) -> Range<usize> {
-        let start_range = self.num_axons();
-        let end_range = start_range + num_axons;
-        self.syn_sorted_ = false;
-        //
-        self.axon_syn_ranges_.resize(
-            end_range,
-            self.num_synapses() as Idx..self.num_synapses() as Idx,
-        );
-        return start_range..end_range;
+        self.clean_ = false;
+        let start_range = self.num_axn_;
+        self.num_axn_ = (self.num_axn_ as usize + num_axons).try_into().unwrap();
+        return start_range as usize..self.num_axn_ as usize;
     }
 
     pub fn add_dendrites(&mut self, num_dendrites: usize) -> Range<usize> {
-        let start_range = self.num_dendrites();
-        let end_range = start_range + num_dendrites;
-        //
-        self.dend_num_connected_.resize(end_range, 0 as Idx);
-        self.dend_synapses_.resize(end_range, vec![]);
-        return start_range..end_range;
+        self.clean_ = false;
+        let start_range = self.num_den_;
+        self.num_den_ = (self.num_den_ as usize + num_dendrites).try_into().unwrap();
+        return start_range as usize..self.num_den_ as usize;
     }
 
     pub fn add_synapse(&mut self, axon: Idx, dendrite: Idx, weight: f32) {
+        debug_assert!(axon < self.num_axons() as Idx);
+        debug_assert!(dendrite < self.num_dendrites() as Idx);
+        self.clean_ = false;
+        self.num_syn_ += 1;
         self.syn_axons_.push(axon);
         self.syn_dendrites_.push(dendrite);
         self.syn_permanences_.push(weight);
-        self.syn_sorted_ = false;
-        if weight >= 0.5 {
-            self.dend_num_connected_[dendrite as usize] += 1;
-        }
     }
 
     /// Randomly sample the active axons.
-    pub fn grow_synapses(&mut self, axons: &mut SDR, dendrite: Idx, weights: &[f32]) {
-        assert!(axons.num_cells() == self.num_axons());
-        assert!(dendrite < self.num_dendrites() as Idx);
+    pub fn grow_selective<F>(
+        &mut self,
+        axons: &mut SDR,
+        dendrite: Idx,
+        max_grow: usize,
+        max_total: usize,
+        mut weights: F,
+    ) where
+        F: FnMut() -> f32,
+    {
+        self.clean();
         let mut rng = rand::thread_rng();
-        let index = axons.sparse();
-        let num_grow = weights.len().min(index.len());
-        let sample = index.choose_multiple(&mut rng, num_grow);
+        let synapses = &self.den_synapses_[dendrite as usize];
+        let num_syn = synapses.len();
+        let num_grow = max_grow.min(max_total - num_syn);
+        let sample = axons.sparse().choose_multiple(&mut rng, num_grow);
 
-        for (&axon, &weight) in sample.zip(weights) {
-            self.add_synapse(axon, dendrite, weight);
+        // Discard presynapses which are already connected to.
+        // todo!();
+
+        for &axon in sample {
+            self.add_synapse(axon, dendrite, weights());
         }
     }
 
-    fn sort_by_axon(&mut self) {
-        if !self.syn_sorted_ && self.num_synapses() > 0 {
-            // Sort the synapses by their presynaptic axon.
-            let mut argsort: Vec<_> = (0..self.num_synapses() as Idx).collect();
-            argsort.sort_by_key(|&idx| self.syn_axons_[idx as usize]);
-            self.syn_axons_ = argsort
-                .iter()
-                .map(|&x| self.syn_axons_[x as usize])
-                .collect();
-            self.syn_dendrites_ = argsort
-                .iter()
-                .map(|&x| self.syn_dendrites_[x as usize])
-                .collect();
-            self.syn_permanences_ = argsort
-                .iter()
-                .map(|&x| self.syn_permanences_[x as usize])
-                .collect();
-            // Scan for contiguous ranges of synaspes from the same axon.
-            let num_axons = self.num_axons();
-            self.axon_syn_ranges_ = Vec::with_capacity(num_axons);
-            let mut start_syn: Idx = 0;
-            let mut cur_axon = self.syn_axons_[0] as Idx;
-            for syn in 1..self.num_synapses() as Idx {
-                let axon = self.syn_axons_[syn as usize];
+    ///
+    pub fn grow_competitive<F>(
+        &mut self,
+        axons: &mut SDR,
+        dendrite: Idx,
+        potential_pct: f32,
+        mut weights: F,
+    ) where
+        F: FnMut() -> f32,
+    {
+        // Calculate the potential pool of presynapses for this dendrite.
+        let estimated_pool_size = 2 * (potential_pct * axons.num_active() as f32).round() as usize;
+        let mut potential_pool = Vec::with_capacity(estimated_pool_size);
+        // Hash the dendrite-axon pair into a stable, unique, and psuedo-random number.
+        // Use that number to decide which synapses are potentially connected.
+        let mut hash_state = DefaultHasher::new();
+        // TODO: Seed the hash with a number unique to this instance.
+        dendrite.hash(&mut hash_state);
+        for &axon in axons.sparse() {
+            let mut syn_hash_state = hash_state.clone();
+            axon.hash(&mut syn_hash_state);
+            let syn_hash: u64 = syn_hash_state.finish();
+            let syn_rnd_num = (syn_hash as f64) / (u64::MAX as f64);
+            if syn_rnd_num < potential_pct as f64 {
+                potential_pool.push(axon);
+            }
+        }
+        // Make synapses to every axon in the potential pool.
+        for axon in potential_pool {
+            self.add_synapse(axon, dendrite, weights());
+        }
+    }
+
+    fn clean(&mut self) {
+        if self.clean_ {
+            return;
+        }
+        // Rearrange the synapses into a new order.
+        let mut syn_order = (0..self.num_syn_).into_iter();
+
+        // Remove the dead synapses from consideration.
+        let mut syn_order = syn_order.filter(|&syn| self.syn_permanences_[syn as usize] > 0.0);
+
+        // Sort the synapses by their presynaptic axon.
+        let mut syn_order: Vec<_> = syn_order.collect();
+        syn_order.sort_by_key(|&syn| self.syn_axons_[syn as usize]);
+
+        // Scan for contiguous ranges of synaspes from the same axon.
+        self.axn_syn_ranges_ = Vec::with_capacity(self.num_axons());
+        let mut start_syn: Idx = 0;
+        if !syn_order.is_empty() {
+            let mut cur_axon = self.syn_axons_[syn_order[0] as usize];
+            for syn in 1..self.num_syn_ {
+                let axon = self.syn_axons_[syn_order[syn as usize] as usize];
                 if axon != cur_axon {
                     // Terminate this contiguous stretch.
-                    self.axon_syn_ranges_.push(start_syn..syn);
+                    self.axn_syn_ranges_.push(start_syn..syn);
                     start_syn = syn;
                     cur_axon = axon;
-                    while (self.axon_syn_ranges_.len() as Idx) < axon {
-                        self.axon_syn_ranges_.push(start_syn..start_syn);
+                    while (self.axn_syn_ranges_.len() as Idx) < axon {
+                        self.axn_syn_ranges_.push(start_syn..start_syn);
                     }
                 }
             }
-            let num_syn = self.num_synapses() as Idx;
-            self.axon_syn_ranges_.push(start_syn..num_syn); // Terminate the final range of synapses.
-            self.axon_syn_ranges_.resize(num_axons, num_syn..num_syn); // Fill in any axons without synapases.
+        }
+        // Terminate the final range of synapses.
+        self.axn_syn_ranges_.push(start_syn..self.num_syn_);
+        // Fill in any axons without synapases.
+        self.axn_syn_ranges_
+            .resize(self.num_axons(), self.num_syn_..self.num_syn_);
 
-            // Update the dendrite synapses.
-            self.dend_synapses_ = vec![vec![]; self.num_dendrites()];
-            for syn in 0..self.num_synapses() as Idx {
-                let dend = self.syn_dendrites_[syn as usize];
-                self.dend_synapses_[dend as usize].push(syn);
+        // Filter out duplicate synapses, keep the oldest synapse, remove the rest.
+        // Sort and dedup each axon's synapses by dendrite.
+        for syn_range in &self.axn_syn_ranges_ {
+            let start = syn_range.start as usize;
+            let end = syn_range.end as usize;
+            syn_order[start..end].sort_by_key(|&syn| self.syn_dendrites_[syn as usize]);
+        }
+        syn_order.dedup_by_key(|&mut syn| {
+            (
+                self.syn_dendrites_[syn as usize],
+                self.syn_axons_[syn as usize],
+            )
+        });
+
+        // Move the synapses into their new postitions.
+        self.syn_axons_ = syn_order
+            .iter()
+            .map(|&x| self.syn_axons_[x as usize])
+            .collect();
+        self.syn_dendrites_ = syn_order
+            .iter()
+            .map(|&x| self.syn_dendrites_[x as usize])
+            .collect();
+        self.syn_permanences_ = syn_order
+            .iter()
+            .map(|&x| self.syn_permanences_[x as usize])
+            .collect();
+
+        // Update the dendrites list of synapse indices.
+        for synapse_list in &mut self.den_synapses_ {
+            synapse_list.clear();
+        }
+        self.den_synapses_.resize(self.num_dendrites(), vec![]);
+        for syn in 0..self.num_synapses() {
+            let dend = self.syn_dendrites_[syn] as usize;
+            self.den_synapses_[dend].push(syn as Idx);
+        }
+
+        // Count the number of connected synapses.
+        self.den_num_connected_ = vec![0; self.num_dendrites()];
+        for syn in 0..self.num_synapses() {
+            if self.syn_permanences_[syn] >= 0.5 {
+                self.den_num_connected_[self.syn_dendrites_[syn] as usize] += 1;
             }
         }
+        self.clean_ = true;
     }
 
     pub fn activate(&mut self, activity: &mut SDR) -> (Vec<u32>, Vec<u32>) {
-        assert_eq!(activity.num_cells(), self.num_axons());
+        debug_assert_eq!(activity.num_cells(), self.num_axons());
 
-        self.sort_by_axon();
+        self.clean();
 
         let mut potential = vec![0; self.num_dendrites()];
         let mut connected = vec![0; self.num_dendrites()];
 
         for &axon in activity.sparse().iter() {
-            for syn in self.axon_syn_ranges_[axon as usize].clone() {
+            for syn in self.axn_syn_ranges_[axon as usize].clone() {
                 let dend = self.syn_dendrites_[syn as usize];
                 let perm = self.syn_permanences_[syn as usize];
                 potential[dend as usize] += 1;
@@ -147,10 +247,10 @@ impl Synapses {
     }
 
     pub fn hebbian(&mut self, presyn: &mut SDR, postsyn: &mut SDR, incr: f32, decr: f32) {
+        self.clean();
         let presyn = presyn.dense();
-        self.sort_by_axon();
         for &dend in postsyn.sparse() {
-            for syn in self.dend_synapses_[dend as usize].clone() {
+            for syn in self.den_synapses_[dend as usize].clone() {
                 let axon = self.syn_axons_[syn as usize];
                 let presyn_active = presyn[axon as usize];
                 let permanence = &mut self.syn_permanences_[syn as usize];
@@ -159,9 +259,9 @@ impl Synapses {
                 let new_state = *permanence > 0.5;
                 if old_state != new_state {
                     if new_state {
-                        self.dend_num_connected_[dend as usize] += 1;
+                        self.den_num_connected_[dend as usize] += 1;
                     } else {
-                        self.dend_num_connected_[dend as usize] -= 1;
+                        self.den_num_connected_[dend as usize] -= 1;
                     }
                 }
             }
@@ -189,10 +289,12 @@ mod tests {
 
     #[test]
     fn basic() {
-        let mut x = Synapses::default();
+        let mut x = Synapses::new();
         assert_eq!(x.add_axons(10), 0..10);
         assert_eq!(x.add_dendrites(10), 0..10);
-        x.grow_synapses(&mut SDR::ones(10), 3, &[0.6, 0.4, 0.5]);
+        let mut weights = [0.6, 0.4, 0.5].into_iter();
+        x.grow_selective(&mut SDR::ones(10), 3, 3, 10, || weights.next().unwrap());
+        dbg!(&x);
         assert_eq!(x.num_synapses(), 3);
         let (pot, con) = x.activate(&mut SDR::ones(10));
         assert_eq!(pot, [0, 0, 0, 3, 0, 0, 0, 0, 0, 0]);
@@ -201,10 +303,10 @@ mod tests {
 
     #[test]
     fn hebbian() {
-        let mut x = Synapses::default();
+        let mut x = Synapses::new();
         x.add_axons(2);
         x.add_dendrites(1);
-        x.grow_synapses(&mut SDR::ones(2), 0, &[0.5, 0.5]);
+        x.grow_selective(&mut SDR::ones(2), 0, 10, 10, || 0.5);
         let mut pattern = SDR::from_dense(vec![false, true]);
         x.hebbian(&mut pattern, &mut SDR::ones(1), 0.1, -0.1);
         let (pot, con) = x.activate(&mut SDR::ones(2));
