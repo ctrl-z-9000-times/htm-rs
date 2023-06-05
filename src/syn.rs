@@ -221,11 +221,6 @@ impl Synapses {
 
         // Filter out duplicate synapses, keep the oldest synapse, remove the rest.
         // Sort and dedup each axon's synapses by dendrite.
-        for syn_range in &self.axn_syn_ranges_ {
-            let start = syn_range.start as usize;
-            let end = syn_range.end as usize;
-            syn_order[start..end].sort_by_key(|&syn| self.syn_dendrites_[syn as usize]);
-        }
         syn_order.dedup_by_key(|&mut syn| {
             (
                 self.syn_dendrites_[syn as usize],
@@ -303,6 +298,9 @@ impl Synapses {
 
 impl std::fmt::Debug for Synapses {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.clean_ {
+            // todo also calc the statistics for num synapses on dendrite, and num synapses on axon.
+        }
         write!(
             f,
             "Synapses (Axons: {}, Dendrites: {}, Synapses: {}, clean={})",

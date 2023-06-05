@@ -70,19 +70,19 @@ def test_mnist():
 
     # DEBUGGING!
     training_data = training_data[:10000]
-    test_data = test_data[:200]
+    test_data = test_data[:500]
 
     # Setup the AI.
     sp = htm_rs.SpatialPooler(
             num_cells  = 1400,
-            num_active = 140,
-            active_thresh  = 12,
+            num_active =  140,
+            active_thresh = 10,
             potential_pct = .5,
             learning_period = 100,
             coincidence_ratio = 10,
             homeostatic_period = 1400,)
 
-    # stats = htm_rs.Stats(1400, 1e6)
+    stats = htm_rs.Stats(sp.num_cells(), 1e6)
     sdrc = Classifier()
 
     # Training Loop
@@ -93,11 +93,11 @@ def test_mnist():
         cpp_columns = htm.SDR([rs_columns.num_cells()])
         cpp_columns.sparse = rs_columns.sparse()
         sdrc.learn( cpp_columns, lbl )
-        # stats.add_sdr(cpp_columns)
+        stats.add_sdr(rs_columns)
         print('.', end='', flush=1)
-
+    print()
     print(sp)
-    # print("Output", str(stats))
+    print(stats)
 
     # Testing Loop
     score = 0

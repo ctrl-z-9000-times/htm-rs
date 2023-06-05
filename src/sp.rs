@@ -44,6 +44,10 @@ impl SpatialPooler {
         };
     }
 
+    pub fn num_cells(&self) -> usize {
+        return self.num_cells;
+    }
+
     fn __str__(&self) -> String {
         return format!(
             "SpatialPooler {{ num_cells: {}, num_active {} }}\n    {:?}",
@@ -94,7 +98,7 @@ impl SpatialPooler {
             .collect();
 
         // Assign new cells to activate.
-        if learn && sparse.len() < self.num_active {
+        if learn && (sparse.len() < self.num_active) {
             let num_new = self.num_active - sparse.len();
             // Select the cells with the lowest activation frequency.
             let mut min_af: Vec<_> = (0..self.num_cells as Idx).collect();
@@ -136,13 +140,10 @@ impl SpatialPooler {
     }
 
     fn update_af(&mut self, activity: &mut SDR) {
-        let alpha = (-1.0f32 / self.homeostatic_period).exp();
-        let beta = 1.0 - alpha;
-        for i in activity.sparse() {
-            self.af[*i as usize] += beta;
-        }
-        for x in self.af.iter_mut() {
-            *x *= alpha;
+        let decay = (-1.0f32 / self.homeostatic_period).exp();
+        let alpha = 1.0 - decay;
+        for (frq, state) in self.af.iter_mut().zip(activity.dense().iter()) {
+            *frq += alpha * (*state as usize as f32 - *frq);
         }
     }
 }

@@ -298,16 +298,13 @@ impl Stats {
             self.mean_overlap_ = 0.0;
             self.var_overlap_ = 0.0;
         }
-        let alpha = (-self.period_.min(self.num_samples_ as f32)).exp();
-        let decay = 1.0 - alpha;
+        let decay = (-1.0 / self.period_.min(self.num_samples_ as f32)).exp();
+        let alpha = 1.0 - decay;
         self.num_samples_ += 1;
 
         // Update the activation frequency data.
-        for frq in &mut self.frequencies_ {
-            *frq *= decay;
-        }
-        for &active in sdr.sparse() {
-            self.frequencies_[active as usize] += alpha;
+        for (frq, state) in self.frequencies_.iter_mut().zip(sdr.dense().iter()) {
+            *frq += alpha * (*state as usize as f32 - *frq);
         }
 
         // Update the sparsity statistics.
