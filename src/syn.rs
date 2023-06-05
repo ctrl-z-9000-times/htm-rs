@@ -44,6 +44,8 @@ impl Synapses {
         };
     }
 
+    pub fn reset(&mut self) {}
+
     pub fn num_axons(&self) -> usize {
         return self.num_axn_ as usize;
     }
@@ -80,6 +82,11 @@ impl Synapses {
         self.syn_permanences_.push(weight);
     }
 
+    pub fn get_num_connected(&self) -> &[Idx] {
+        debug_assert!(self.clean_);
+        return self.den_num_connected_.as_slice();
+    }
+
     /// Randomly sample the active axons.
     pub fn grow_selective<F>(
         &mut self,
@@ -91,7 +98,6 @@ impl Synapses {
     ) where
         F: FnMut() -> f32,
     {
-        self.clean();
         let mut rng = rand::thread_rng();
         let synapses = &self.den_synapses_[dendrite as usize];
         let num_syn = synapses.len();
@@ -99,6 +105,7 @@ impl Synapses {
         let sample = axons.sparse().choose_multiple(&mut rng, num_grow);
 
         // Discard presynapses which are already connected to.
+        // This should immediately select new presynapses to replace them.
         // todo!();
 
         for &axon in sample {
@@ -133,7 +140,8 @@ impl Synapses {
                 potential_pool.push(axon);
             }
         }
-        // Make synapses to every axon in the potential pool.
+        // Make synapses to every axon in the potential pool. This will make
+        // duplicate synapses, which will be removed next time it's cleaned.
         for axon in potential_pool {
             self.add_synapse(axon, dendrite, weights());
         }
@@ -192,6 +200,7 @@ impl Synapses {
         });
 
         // Move the synapses into their new postitions.
+        self.num_syn_ = syn_order.len() as Idx;
         self.syn_axons_ = syn_order
             .iter()
             .map(|&x| self.syn_axons_[x as usize])
@@ -227,7 +236,6 @@ impl Synapses {
 
     pub fn activate(&mut self, activity: &mut SDR) -> (Vec<u32>, Vec<u32>) {
         debug_assert_eq!(activity.num_cells(), self.num_axons());
-
         self.clean();
 
         let mut potential = vec![0; self.num_dendrites()];
@@ -250,7 +258,7 @@ impl Synapses {
         self.clean();
         let presyn = presyn.dense();
         for &dend in postsyn.sparse() {
-            for syn in self.den_synapses_[dend as usize].clone() {
+            for &syn in &self.den_synapses_[dend as usize] {
                 let axon = self.syn_axons_[syn as usize];
                 let presyn_active = presyn[axon as usize];
                 let permanence = &mut self.syn_permanences_[syn as usize];
@@ -267,18 +275,17 @@ impl Synapses {
             }
         }
     }
-
-    pub fn reset(&mut self) {}
 }
 
 impl std::fmt::Debug for Synapses {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(
             f,
-            "Synapses (Axons: {}, Dendrites: {} Synapses: {})",
+            "Synapses (Axons: {}, Dendrites: {}, Synapses: {}, clean={})",
             self.num_axons(),
             self.num_dendrites(),
             self.num_synapses(),
+            self.clean_,
         )
     }
 }

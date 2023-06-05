@@ -28,7 +28,7 @@ impl SpatialPooler {
         coincidence_ratio: f32,
         homeostatic_period: f32,
     ) -> Self {
-        let mut syn = Synapses::default();
+        let mut syn = Synapses::new();
         syn.add_dendrites(num_cells);
         let sparsity = num_active as f32 / num_cells as f32;
         return Self {
@@ -46,8 +46,8 @@ impl SpatialPooler {
 
     fn __str__(&self) -> String {
         return format!(
-            "SpatialPooler {{ num_cells: {}, num_active {} }}",
-            self.num_cells, self.num_active
+            "SpatialPooler {{ num_cells: {}, num_active {} }}\n    {:?}",
+            self.num_cells, self.num_active, self.syn
         );
     }
 
@@ -65,7 +65,7 @@ impl SpatialPooler {
         let boost_factor_adjust = 1.0 / sparsity.log2();
         let mut activity: Vec<_> = connected
             .iter()
-            .zip(&self.syn.dend_num_connected_)
+            .zip(self.syn.get_num_connected())
             .zip(&self.af)
             .map(|((&x, &nsyn), &af)| {
                 if nsyn == 0 {
@@ -120,15 +120,9 @@ impl SpatialPooler {
         let decr = -incr / self.coincidence_ratio;
         self.syn.hebbian(inputs, activity, incr, decr);
         // Grow new synapses.
-        let num_syn = (inputs.num_cells() as f32 * self.potential_pct).round() as usize;
         for &dend in activity.sparse() {
-            let weights = vec![0.5; num_syn];
-            // TODO: Randomize the synapse weights.
-
-            // TODO: How to implement the potential pool?
-            // Or some other way of limiting the synapse growth?
-            //     Potential pool is easy to impl: hash(axon & dend) < potential_pct
-            self.syn.grow_synapses(inputs, dend, &weights);
+            self.syn
+                .grow_competitive(inputs, dend, self.potential_pct, || 0.5);
         }
     }
 }
@@ -170,7 +164,15 @@ mod tests {
 
     #[test]
     fn basic() {
-        let mut sp = SpatialPooler::new();
+        let mut sp = SpatialPooler::new(
+            2000,  // num_cells
+            40,    // num_active
+            10,    // active_thresh
+            0.2,   // potential_pct
+            10.0,  // learning_period
+            10.0,  // coincidence_ratio
+            100.0, // homeostatic_period
+        );
         // Start with some random initial synapses.
         for _ in 0..100 {
             sp.advance(&mut SDR::random(500, 0.1), true);
