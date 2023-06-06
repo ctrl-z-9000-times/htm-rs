@@ -69,15 +69,15 @@ def test_mnist():
     random.shuffle(training_data)
 
     # DEBUGGING!
-    training_data = training_data[:10000]
-    test_data = test_data[:500]
+    # training_data = training_data[:10000]
+    # test_data = test_data[:500]
 
     # Setup the AI.
     sp = htm_rs.SpatialPooler(
             num_cells  = 1400,
             num_active =  140,
             active_thresh = 10,
-            potential_pct = .5,
+            potential_pct = .2,
             learning_period = 100,
             coincidence_ratio = 10,
             homeostatic_period = 1400,)
