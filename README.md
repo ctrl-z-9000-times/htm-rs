@@ -1,8 +1,12 @@
 # htm-rs
 Hierarchical Temporal Memory, in Rust
 
-Features:
+### Features:
 - Python Bindings
-- SDR Data Structure and Utilities
-- General Purpose Synapses
-- Spatial Pooler Algorithms
+- SDR Data Structures
+- Reusable Synapses Class
+- Spatial Pooler Algorithm
+
+### Not Yet Implemented:
+- Simple Scalar Encoder
+- Classifier
