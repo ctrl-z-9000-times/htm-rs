@@ -85,17 +85,10 @@ impl SpatialPooler {
             .collect();
 
         // Run the Winner-Takes-All Competition.
-        let mut sparse: Vec<_> = (0..self.num_cells as Idx).collect();
-        sparse.select_nth_unstable_by(self.num_active, |&x, &y| {
-            cmp_f32(activity[x as usize], activity[y as usize]).reverse()
-        });
-        sparse.resize(self.num_active, 0);
+        let mut sparse = competition(&activity, self.num_active);
 
         // Apply the activation threshold.
-        let mut sparse: Vec<_> = sparse
-            .into_iter()
-            .filter(|&cell| connected[cell as usize] > self.active_thresh as Idx)
-            .collect();
+        sparse.retain(|&cell| connected[cell as usize] > self.active_thresh as Idx);
 
         // Assign new cells to activate.
         if learn && (sparse.len() < self.num_active) {
@@ -121,7 +114,7 @@ impl SpatialPooler {
         self.lazy_init(inputs);
         self.update_af(activity);
         // Hebbian Learning.
-        let incr = 1.0 - (-1.0 / self.learning_period).exp();
+        let incr = 1.0 / self.learning_period;
         let decr = -incr / self.coincidence_ratio;
         self.syn.hebbian(inputs, activity, incr, decr);
         // Grow new synapses.
@@ -146,6 +139,15 @@ impl SpatialPooler {
             *frq += alpha * (*state as usize as f32 - *frq);
         }
     }
+}
+
+pub fn competition(activity: &[f32], num_active: usize) -> Vec<Idx> {
+    let mut sparse: Vec<_> = (0..activity.len() as Idx).collect();
+    sparse.select_nth_unstable_by(num_active, |&x, &y| {
+        cmp_f32(activity[x as usize], activity[y as usize]).reverse()
+    });
+    sparse.resize(num_active, 0);
+    return sparse;
 }
 
 fn cmp_f32(a: f32, b: f32) -> std::cmp::Ordering {

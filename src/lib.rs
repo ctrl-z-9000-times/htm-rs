@@ -14,6 +14,9 @@ pub use syn::Synapses;
 mod sp;
 pub use sp::SpatialPooler;
 
+mod predict;
+pub use predict::Predictor;
+
 // mod tm;
 // pub use tm::TemporalMemory;
 

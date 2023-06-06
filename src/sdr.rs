@@ -33,6 +33,9 @@ impl SDR {
 
     #[staticmethod]
     pub fn random(num_cells: usize, sparsity: f32) -> Self {
+        // TODO: Consider changing sparsity into num_active, since I think
+        // that's more intuitive for the users and it more directly translates
+        // into the source code.
         let mut rng = rand::thread_rng();
         let num_active = (num_cells as f32 * sparsity).round() as usize;
         let index = rand::seq::index::sample(&mut rng, num_cells, num_active)
@@ -101,7 +104,10 @@ impl SDR {
     }
 
     pub fn overlap(&mut self, other: &mut Self) -> usize {
-        assert_eq!(self.num_cells(), other.num_cells());
+        assert!(
+            self.num_cells() == other.num_cells(),
+            "sdr.overlap(): both SDRs must have the same num_cells"
+        );
         let mut ovlp = 0;
         for (a, b) in self.dense().iter().zip(other.dense().iter()) {
             if *a && *b {

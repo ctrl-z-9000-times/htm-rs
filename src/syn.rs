@@ -150,7 +150,7 @@ impl Synapses {
     }
 
     pub fn activate(&mut self, activity: &mut SDR) -> (Vec<u32>, Vec<u32>) {
-        debug_assert_eq!(activity.num_cells(), self.num_axons());
+        debug_assert!(activity.num_cells() == self.num_axons());
         self.clean();
 
         let mut potential = vec![0; self.num_dendrites()];
@@ -208,7 +208,7 @@ impl Synapses {
         let mut syn_order = (0..self.num_syn_).into_iter();
 
         // Remove the dead synapses from consideration.
-        let mut syn_order = syn_order.filter(|&syn| self.syn_permanences_[syn as usize] > 0.0);
+        let mut syn_order = syn_order.filter(|&syn| self.syn_permanences_[syn as usize] != 0.0);
 
         // Sort the synapses by presynaptic axon and then postsynaptic dendrite.
         let mut syn_order: Vec<_> = syn_order.collect();
