@@ -1,8 +1,10 @@
 use crate::sp::competition;
 use crate::{Idx, Synapses, SDR};
+use pyo3::prelude::*;
 
 /// This class uses the spatial pooler algorithm to learn the given sequence of
 /// (input -> output) pairs.
+#[pyclass]
 pub struct Predictor {
     num_steps: usize,
     num_cells: usize,
@@ -17,7 +19,9 @@ pub struct Predictor {
     syn: Synapses,
 }
 
+#[pymethods]
 impl Predictor {
+    #[new]
     pub fn new(
         num_steps: usize,
         num_cells: usize,

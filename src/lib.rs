@@ -28,6 +28,8 @@ fn htm_rs(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<SDR>()?;
     m.add_class::<Stats>()?;
     m.add_class::<SpatialPooler>()?;
+    m.add_class::<Predictor>()?;
+    // m.add_class::<Encoder>()?;
 
     Ok(())
 }
