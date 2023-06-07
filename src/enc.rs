@@ -67,8 +67,15 @@ impl Encoder {
         } else {
             self.decode_scalar(sdr)
         };
+        if output.is_nan() {
+            return (f32::NAN, 0.0);
+        }
         let confidence = sdr.percent_overlap(&mut self.encode(output));
-        return (output, confidence);
+        if confidence <= 0.02 {
+            return (f32::NAN, confidence);
+        } else {
+            return (output, confidence);
+        }
     }
 }
 
@@ -77,6 +84,9 @@ impl Encoder {
         // Convolve a box filter over the sparse indices.
         let box_filter = self.num_active;
         let num_active = sdr.num_active();
+        if num_active == 0 {
+            return f32::NAN;
+        }
         let sparse = sdr.sparse();
         let mut start = 0;
         let mut end = 0;

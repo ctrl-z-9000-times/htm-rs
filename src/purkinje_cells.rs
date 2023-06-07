@@ -1,4 +1,4 @@
-use crate::sp::competition;
+use crate::sp::{competition, learn};
 use crate::{Idx, Synapses, SDR};
 use pyo3::prelude::*;
 
@@ -95,16 +95,14 @@ impl PurkinjeCells {
                     input = SDR::zeros(self.syn.num_axons());
                 }
             }
-            // Apply Hebbian learning to the correct outputs.
-            let incr = 1.0 / self.learning_period;
-            let decr = -incr / self.coincidence_ratio;
-            self.syn.hebbian(&mut input, &mut output, incr, decr);
-            // Grow new synapses.
-            let w = || 0.5;
-            let w = rand::random::<f32>;
-            for &dend in output.sparse() {
-                self.syn.grow_competitive(&mut input, dend, self.potential_pct, w);
-            }
+            learn(
+                &mut self.syn,
+                &mut input,
+                &mut output,
+                self.learning_period,
+                self.coincidence_ratio,
+                self.potential_pct,
+            );
 
             // Depress the synapses leading to the incorrect outputs.
             // let incorrect = active - output;

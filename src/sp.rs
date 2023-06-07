@@ -111,14 +111,14 @@ impl SpatialPooler {
     pub fn learn(&mut self, inputs: &mut SDR, activity: &mut SDR) {
         self.lazy_init(inputs);
         self.update_af(activity);
-        // Hebbian Learning.
-        let incr = 1.0 / self.learning_period;
-        let decr = -incr / self.coincidence_ratio;
-        self.syn.hebbian(inputs, activity, incr, decr);
-        // Grow new synapses.
-        for &dend in activity.sparse() {
-            self.syn.grow_competitive(inputs, dend, self.potential_pct, || 0.5);
-        }
+        learn(
+            &mut self.syn,
+            inputs,
+            activity,
+            self.learning_period,
+            self.coincidence_ratio,
+            self.potential_pct,
+        );
     }
 }
 
@@ -156,6 +156,28 @@ fn cmp_f32(a: f32, b: f32) -> std::cmp::Ordering {
         std::cmp::Ordering::Equal
     } else {
         panic!()
+    }
+}
+
+pub fn learn(
+    synapses: &mut Synapses,
+    inputs: &mut SDR,
+    activity: &mut SDR,
+    learning_period: f32,
+    coincidence_ratio: f32,
+    potential_pct: f32,
+) {
+    // Hebbian Learning.
+    let incr = 1.0 / learning_period;
+    let decr = if coincidence_ratio != 0.0 {
+        -incr / coincidence_ratio
+    } else {
+        -1.0
+    };
+    synapses.hebbian(inputs, activity, incr, decr);
+    // Grow new synapses.
+    for &dend in activity.sparse() {
+        synapses.grow_competitive(inputs, dend, potential_pct, || 0.5);
     }
 }
 

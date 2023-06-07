@@ -162,6 +162,7 @@ impl SDR {
     }
 
     #[staticmethod]
+    #[pyo3(name = "concatenate")]
     #[args(sdrs = "*")]
     fn py_concatenate(sdrs: &PyTuple) -> Self {
         let mut sdrs: Vec<PyRefMut<SDR>> = sdrs.iter().map(|arg: &PyAny| arg.extract().unwrap()).collect();
