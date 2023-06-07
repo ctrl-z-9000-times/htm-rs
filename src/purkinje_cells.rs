@@ -3,9 +3,10 @@ use crate::{Idx, Synapses, SDR};
 use pyo3::prelude::*;
 
 /// This class uses the spatial pooler algorithm to learn the given sequence of
-/// (input -> output) pairs.
+/// (input -> output) pairs. If num_steps > 0 then this predicts a future
+/// output instead of the current one.
 #[pyclass]
-pub struct Predictor {
+pub struct PurkinjeCells {
     num_steps: usize,
     num_cells: usize,
     num_active: usize,
@@ -20,7 +21,7 @@ pub struct Predictor {
 }
 
 #[pymethods]
-impl Predictor {
+impl PurkinjeCells {
     #[new]
     pub fn new(
         num_steps: usize,
@@ -42,7 +43,7 @@ impl Predictor {
             learning_period,
             coincidence_ratio,
             step: 0,
-            input_buffer: vec![SDR::zeros(num_cells); num_steps],
+            input_buffer: vec![SDR::zeros(0); num_steps],
             syn,
         };
     }
@@ -55,7 +56,7 @@ impl Predictor {
     }
 
     pub fn reset(&mut self) {
-        self.input_buffer = vec![SDR::zeros(self.num_cells()); self.num_steps()];
+        self.input_buffer = vec![SDR::zeros(0); self.num_steps()];
     }
 
     pub fn advance(&mut self, mut input: SDR, mut output: Option<SDR>) -> SDR {
@@ -90,16 +91,20 @@ impl Predictor {
             if self.num_steps() > 0 {
                 std::mem::swap(&mut input, &mut self.input_buffer[self.step]);
                 self.step = (self.step + 1) % self.num_steps(); // Rotate our index into the circular buffer.
+                if input.num_cells() == 0 {
+                    input = SDR::zeros(self.syn.num_axons());
+                }
             }
-
             // Apply Hebbian learning to the correct outputs.
             let incr = 1.0 / self.learning_period;
             let decr = -incr / self.coincidence_ratio;
             self.syn.hebbian(&mut input, &mut output, incr, decr);
             // Grow new synapses.
+            let w = || 0.5;
+            let w = rand::random::<f32>;
             for &dend in output.sparse() {
                 self.syn
-                    .grow_competitive(&mut input, dend, self.potential_pct, || 0.5);
+                    .grow_competitive(&mut input, dend, self.potential_pct, w);
             }
 
             // Depress the synapses leading to the incorrect outputs.
@@ -121,19 +126,19 @@ mod tests {
         let delay = 3;
         let num_cells = 2000;
         let num_active = 40;
-        let input_sdr = || SDR::random(5000, 0.02);
+        let input_sdr = || SDR::random(100_000, 0.001);
         let output_sdr = || SDR::random(num_cells, num_active as f32 / num_cells as f32);
-        let mut nn = Predictor::new(
+        let mut nn = PurkinjeCells::new(
             delay,      // num_steps
             num_cells,  // num_cells
             num_active, // num_active
-            3,          // active_thresh
-            0.2,        // potential_pct
+            10,         // active_thresh
+            0.3,        // potential_pct
             10.0,       // learning_period
             10.0,       // coincidence_ratio
         );
 
-        let seq_len = if cfg!(debug_assertions) { 20 } else { 100 };
+        let seq_len = if cfg!(debug_assertions) { 10 } else { 1000 };
         let mut input_seq: Vec<SDR> = (0..seq_len).map(|_| input_sdr()).collect();
         let mut output_seq: Vec<SDR> = (0..seq_len).map(|_| output_sdr()).collect();
 
@@ -143,16 +148,23 @@ mod tests {
                 nn.advance(input_seq[t].clone(), Some(output_seq[t].clone()));
             }
         }
-        dbg!(&nn.syn);
+
+        // This reset prevents the last elements of the training sequence from
+        // learning the random noise.
+        nn.reset();
+
+        for noise in 0..3 * seq_len {
+            nn.advance(input_sdr(), Some(output_sdr()));
+        }
+
         // Test.
+        dbg!(&nn.syn);
+
         for t in 0..seq_len {
             let mut prediction = nn.advance(input_seq[t].clone(), None);
             let correct = &mut output_seq[(t + delay) % seq_len];
             let mut overlap = prediction.percent_overlap(correct);
-            dbg!(&input_seq[t]);
             dbg!(overlap);
-            dbg!(prediction);
-            dbg!(correct);
             assert!(overlap >= 0.90);
         }
     }

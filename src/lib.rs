@@ -14,8 +14,8 @@ pub use syn::Synapses;
 mod sp;
 pub use sp::SpatialPooler;
 
-mod predict;
-pub use predict::Predictor;
+mod purkinje_cells;
+pub use purkinje_cells::PurkinjeCells;
 
 mod enc;
 pub use enc::Encoder;
@@ -31,7 +31,7 @@ fn htm_rs(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<SDR>()?;
     m.add_class::<Stats>()?;
     m.add_class::<SpatialPooler>()?;
-    m.add_class::<Predictor>()?;
+    m.add_class::<PurkinjeCells>()?;
     // m.add_class::<Encoder>()?;
 
     Ok(())

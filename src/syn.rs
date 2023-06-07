@@ -170,6 +170,8 @@ impl Synapses {
     }
 
     pub fn hebbian(&mut self, presyn: &mut SDR, postsyn: &mut SDR, incr: f32, decr: f32) {
+        assert!(presyn.num_cells() == self.num_axons());
+        assert!(postsyn.num_cells() == self.num_dendrites());
         self.clean();
         let presyn = presyn.dense();
         for &dend in postsyn.sparse() {
