@@ -116,13 +116,8 @@ impl Synapses {
     }
 
     ///
-    pub fn grow_competitive<F>(
-        &mut self,
-        axons: &mut SDR,
-        dendrite: Idx,
-        potential_pct: f32,
-        mut weights: F,
-    ) where
+    pub fn grow_competitive<F>(&mut self, axons: &mut SDR, dendrite: Idx, potential_pct: f32, mut weights: F)
+    where
         F: FnMut() -> f32,
     {
         // Calculate the potential pool of presynapses for this dendrite.
@@ -214,36 +209,17 @@ impl Synapses {
 
         // Sort the synapses by presynaptic axon and then postsynaptic dendrite.
         let mut syn_order: Vec<_> = syn_order.collect();
-        syn_order.sort_by_key(|&syn| {
-            (
-                self.syn_axons_[syn as usize],
-                self.syn_dendrites_[syn as usize],
-            )
-        });
+        syn_order.sort_by_key(|&syn| (self.syn_axons_[syn as usize], self.syn_dendrites_[syn as usize]));
 
         // Filter out duplicate synapses, keep the oldest synapse, remove the rest.
         // Sort and dedup each axon's synapses by dendrite.
-        syn_order.dedup_by_key(|&mut syn| {
-            (
-                self.syn_dendrites_[syn as usize],
-                self.syn_axons_[syn as usize],
-            )
-        });
+        syn_order.dedup_by_key(|&mut syn| (self.syn_dendrites_[syn as usize], self.syn_axons_[syn as usize]));
 
         // Move the synapses into their new postitions.
         self.num_syn_ = syn_order.len() as Idx;
-        self.syn_axons_ = syn_order
-            .iter()
-            .map(|&x| self.syn_axons_[x as usize])
-            .collect();
-        self.syn_dendrites_ = syn_order
-            .iter()
-            .map(|&x| self.syn_dendrites_[x as usize])
-            .collect();
-        self.syn_permanences_ = syn_order
-            .iter()
-            .map(|&x| self.syn_permanences_[x as usize])
-            .collect();
+        self.syn_axons_ = syn_order.iter().map(|&x| self.syn_axons_[x as usize]).collect();
+        self.syn_dendrites_ = syn_order.iter().map(|&x| self.syn_dendrites_[x as usize]).collect();
+        self.syn_permanences_ = syn_order.iter().map(|&x| self.syn_permanences_[x as usize]).collect();
     }
 
     fn rebuild_axons(&mut self) {

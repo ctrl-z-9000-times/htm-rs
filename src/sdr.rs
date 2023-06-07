@@ -164,10 +164,7 @@ impl SDR {
     #[staticmethod]
     #[args(sdrs = "*")]
     fn py_concatenate(sdrs: &PyTuple) -> Self {
-        let mut sdrs: Vec<PyRefMut<SDR>> = sdrs
-            .iter()
-            .map(|arg: &PyAny| arg.extract().unwrap())
-            .collect();
+        let mut sdrs: Vec<PyRefMut<SDR>> = sdrs.iter().map(|arg: &PyAny| arg.extract().unwrap()).collect();
         let mut sdrs: Vec<&mut SDR> = sdrs.iter_mut().map(|arg| arg.deref_mut()).collect();
         return SDR::concatenate(sdrs.as_mut_slice());
     }
@@ -372,12 +369,7 @@ impl Stats {
             return f32::NAN;
         } else {
             let mean = self.mean_frequency();
-            return self
-                .frequencies_
-                .iter()
-                .map(|&x| (x - mean).powi(2))
-                .sum::<f32>()
-                / self.num_cells_ as f32;
+            return self.frequencies_.iter().map(|&x| (x - mean).powi(2)).sum::<f32>() / self.num_cells_ as f32;
         }
     }
     pub fn entropy(&self) -> f32 {

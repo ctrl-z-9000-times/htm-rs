@@ -95,9 +95,7 @@ impl SpatialPooler {
             let num_new = self.num_active - sparse.len();
             // Select the cells with the lowest activation frequency.
             let mut min_af: Vec<_> = (0..self.num_cells as Idx).collect();
-            min_af.select_nth_unstable_by(num_new, |&x, &y| {
-                cmp_f32(self.af[x as usize], self.af[y as usize])
-            });
+            min_af.select_nth_unstable_by(num_new, |&x, &y| cmp_f32(self.af[x as usize], self.af[y as usize]));
             min_af.resize(num_new, 0);
             sparse.append(&mut min_af);
         }
@@ -119,8 +117,7 @@ impl SpatialPooler {
         self.syn.hebbian(inputs, activity, incr, decr);
         // Grow new synapses.
         for &dend in activity.sparse() {
-            self.syn
-                .grow_competitive(inputs, dend, self.potential_pct, || 0.5);
+            self.syn.grow_competitive(inputs, dend, self.potential_pct, || 0.5);
         }
     }
 }

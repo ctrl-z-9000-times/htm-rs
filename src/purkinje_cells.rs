@@ -103,8 +103,7 @@ impl PurkinjeCells {
             let w = || 0.5;
             let w = rand::random::<f32>;
             for &dend in output.sparse() {
-                self.syn
-                    .grow_competitive(&mut input, dend, self.potential_pct, w);
+                self.syn.grow_competitive(&mut input, dend, self.potential_pct, w);
             }
 
             // Depress the synapses leading to the incorrect outputs.
