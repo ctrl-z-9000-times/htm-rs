@@ -17,6 +17,9 @@ pub use sp::SpatialPooler;
 mod predict;
 pub use predict::Predictor;
 
+mod enc;
+pub use enc::Encoder;
+
 // mod tm;
 // pub use tm::TemporalMemory;
 
