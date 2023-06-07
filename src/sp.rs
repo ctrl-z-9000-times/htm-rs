@@ -19,7 +19,7 @@ pub struct SpatialPooler {
 impl SpatialPooler {
     #[new]
     // #[args()] // TODO: Make the python version pretty w/ default values.
-    fn new(
+    pub fn new(
         num_cells: usize,
         num_active: usize,
         active_thresh: usize,

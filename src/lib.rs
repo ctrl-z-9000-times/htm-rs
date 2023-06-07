@@ -20,6 +20,9 @@ pub use purkinje_cells::PurkinjeCells;
 mod enc;
 pub use enc::Encoder;
 
+mod cerebellum;
+pub use cerebellum::Cerebellum;
+
 // mod tm;
 // pub use tm::TemporalMemory;
 
@@ -32,7 +35,8 @@ fn htm_rs(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Stats>()?;
     m.add_class::<SpatialPooler>()?;
     m.add_class::<PurkinjeCells>()?;
-    // m.add_class::<Encoder>()?;
+    m.add_class::<Encoder>()?;
+    m.add_class::<Cerebellum>()?;
 
     Ok(())
 }
