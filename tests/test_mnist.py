@@ -93,7 +93,7 @@ def test_mnist():
         cpp_columns = htm.SDR([rs_columns.num_cells()])
         cpp_columns.sparse = rs_columns.sparse()
         sdrc.learn( cpp_columns, lbl )
-        stats.add_sdr(rs_columns)
+        stats.update(rs_columns)
         print('.', end='', flush=1)
     print()
     print(sp)

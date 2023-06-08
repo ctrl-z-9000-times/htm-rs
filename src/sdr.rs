@@ -244,11 +244,25 @@ impl SDR {
 
 impl std::fmt::Debug for SDR {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SDR({} cells, ", self.num_cells(),)?;
         if let Some(sparse) = &self.sparse_ {
-            write!(f, "SDR({}, nact={})", self.num_cells(), sparse.len())
+            write!(f, "{} active, ", sparse.len(),)?;
         } else {
-            write!(f, "SDR({})", self.num_cells(),)
+            write!(f, "? active, ",)?;
         }
+        match (self.sparse_.is_some(), self.dense_.is_some()) {
+            (false, false) => write!(f, "--)")?,
+            (false, true) => write!(f, "-d)")?,
+            (true, false) => write!(f, "s-)")?,
+            (true, true) => write!(f, "sd)")?,
+        }
+        Ok(())
+    }
+}
+// Display message is the same as Debug message.
+impl std::fmt::Display for SDR {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 
@@ -295,7 +309,7 @@ impl Stats {
         };
     }
 
-    pub fn add_sdr(&mut self, sdr: &mut SDR) {
+    pub fn update(&mut self, sdr: &mut SDR) {
         if self.num_samples_ == 0 {
             self.mean_sparsity_ = 0.0;
             self.var_sparsity_ = 0.0;
@@ -339,6 +353,9 @@ impl Stats {
 
     pub fn num_cells(&self) -> usize {
         return self.num_cells_ as usize;
+    }
+    pub fn num_samples(&self) -> usize {
+        return self.num_samples_ as usize;
     }
     pub fn min_sparsity(&self) -> f32 {
         return self.min_sparsity_;
@@ -394,7 +411,7 @@ impl Stats {
         return self.var_overlap_.sqrt();
     }
     fn __str__(&self) -> String {
-        return format!("{:?}", self);
+        return format!("{}", self);
     }
 }
 
@@ -418,7 +435,12 @@ impl Stats {
 
 impl std::fmt::Debug for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "SDR({})", self.num_cells(),)?;
+        writeln!(
+            f,
+            "SDR Statistics({} cells, {} samples)",
+            self.num_cells(),
+            self.num_samples()
+        )?;
         writeln!(f, "           |  min  |  max  |  mean |  std  |",)?;
         writeln!(
             f,
@@ -445,6 +467,12 @@ impl std::fmt::Debug for Stats {
             self.std_overlap()
         )?;
         writeln!(f, "Entropy: {:.1}%", (self.entropy() * 100.0))
+    }
+}
+// Display message is the same as Debug message.
+impl std::fmt::Display for Stats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 
