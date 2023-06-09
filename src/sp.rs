@@ -8,7 +8,7 @@ pub struct SpatialPooler {
     active_thresh: usize,
     potential_pct: f32,
     learning_period: f32,
-    coincidence_ratio: f32,
+    incidence_rate: f32,
     homeostatic_period: f32,
 
     pub syn: Synapses,
@@ -25,10 +25,10 @@ impl SpatialPooler {
         active_thresh: usize,
         potential_pct: f32,
         learning_period: f32,
-        coincidence_ratio: f32,
+        incidence_rate: f32,
         homeostatic_period: f32,
     ) -> Self {
-        let mut syn = Synapses::new(1.0 / coincidence_ratio, None);
+        let mut syn = Synapses::new(incidence_rate, None);
         syn.add_dendrites(num_cells);
         let sparsity = num_active as f32 / num_cells as f32;
         return Self {
@@ -37,7 +37,7 @@ impl SpatialPooler {
             active_thresh,
             potential_pct,
             learning_period,
-            coincidence_ratio,
+            incidence_rate,
             homeostatic_period,
             syn,
             af: vec![sparsity; num_cells],
@@ -116,7 +116,7 @@ impl SpatialPooler {
             inputs,
             activity,
             self.learning_period,
-            self.coincidence_ratio,
+            self.incidence_rate,
             self.potential_pct,
         );
     }
@@ -165,7 +165,7 @@ pub fn learn(
     inputs: &mut SDR,
     activity: &mut SDR,
     learning_period: f32,
-    coincidence_ratio: f32,
+    incidence_rate: f32,
     potential_pct: f32,
 ) {
     synapses.learn(inputs, activity, learning_period);
@@ -188,7 +188,7 @@ mod tests {
             10,    // active_thresh
             0.5,   // potential_pct
             10.0,  // learning_period
-            10.0,  // coincidence_ratio
+            0.1,   // incidence_rate
             100.0, // homeostatic_period
         );
         sp.reset();
