@@ -4,89 +4,90 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
 
-// TODO: Make the connected threshold into an argument?
-
 pub struct Synapses {
-    clean_: bool,
-    seed_: u64,
+    incidence_rate: f32,
+    clean: bool,
+    seed: u64,
 
-    num_syn_: Idx,
-    num_axn_: Idx,
-    num_den_: Idx,
+    num_synapses: usize,
+    num_axons: usize,
+    num_dendrites: usize,
 
     // The synapses are sorted by presynaptic axon and then postsynaptic dendrite.
 
     // Parallel arrays of synapse data.
-    syn_axons_: Vec<Idx>,
-    syn_dendrites_: Vec<Idx>,
-    syn_permanences_: Vec<f32>,
+    syn_axons: Vec<Idx>,
+    syn_dendrites: Vec<Idx>,
+    syn_incidence: Vec<f32>,
 
     // Parallel arrays of axon data.
-    axn_syn_ranges_: Vec<Range<Idx>>,
+    axn_syn_ranges: Vec<Range<Idx>>,
 
     // Parallel arrays of dendrite data.
-    den_synapses_: Vec<Vec<Idx>>,
-    den_num_connected_: Vec<Idx>,
+    den_synapses: Vec<Vec<Idx>>,
+    den_num_connected: Vec<Idx>,
 }
 
 impl Synapses {
-    pub fn new() -> Self {
+    pub fn new(incidence_rate: f32, seed: Option<u64>) -> Self {
+        assert!(0.0 <= incidence_rate && incidence_rate <= 1.0);
         return Self {
-            clean_: false,
-            seed_: 42,
-            num_syn_: 0,
-            num_axn_: 0,
-            num_den_: 0,
-            syn_axons_: vec![],
-            syn_dendrites_: vec![],
-            syn_permanences_: vec![],
-            axn_syn_ranges_: vec![],
-            den_synapses_: vec![],
-            den_num_connected_: vec![],
+            incidence_rate: incidence_rate,
+            clean: false,
+            seed: seed.unwrap_or_else(|| 42), // todo id like to seed on system time or something like that.
+            num_synapses: 0,
+            num_axons: 0,
+            num_dendrites: 0,
+            syn_axons: vec![],
+            syn_dendrites: vec![],
+            syn_incidence: vec![],
+            axn_syn_ranges: vec![],
+            den_synapses: vec![],
+            den_num_connected: vec![],
         };
     }
 
     pub fn reset(&mut self) {}
 
     pub fn num_axons(&self) -> usize {
-        return self.num_axn_ as usize;
+        return self.num_axons;
     }
 
     pub fn num_dendrites(&self) -> usize {
-        return self.num_den_ as usize;
+        return self.num_dendrites;
     }
 
     pub fn num_synapses(&self) -> usize {
-        return self.num_syn_ as usize;
+        return self.num_synapses;
     }
 
     pub fn add_axons(&mut self, num_axons: usize) -> Range<usize> {
-        self.clean_ = false;
-        let start_range = self.num_axn_;
-        self.num_axn_ = (self.num_axn_ as usize + num_axons).try_into().unwrap();
-        return start_range as usize..self.num_axn_ as usize;
+        self.clean = false;
+        let start_range = self.num_axons;
+        self.num_axons += num_axons;
+        return start_range..self.num_axons;
     }
 
     pub fn add_dendrites(&mut self, num_dendrites: usize) -> Range<usize> {
-        self.clean_ = false;
-        let start_range = self.num_den_;
-        self.num_den_ = (self.num_den_ as usize + num_dendrites).try_into().unwrap();
-        return start_range as usize..self.num_den_ as usize;
+        self.clean = false;
+        let start_range = self.num_dendrites;
+        self.num_dendrites += num_dendrites;
+        return start_range..self.num_dendrites;
     }
 
     pub fn add_synapse(&mut self, axon: Idx, dendrite: Idx, weight: f32) {
         debug_assert!(axon < self.num_axons() as Idx);
         debug_assert!(dendrite < self.num_dendrites() as Idx);
-        self.clean_ = false;
-        self.num_syn_ += 1;
-        self.syn_axons_.push(axon);
-        self.syn_dendrites_.push(dendrite);
-        self.syn_permanences_.push(weight);
+        self.clean = false;
+        self.num_synapses += 1;
+        self.syn_axons.push(axon);
+        self.syn_dendrites.push(dendrite);
+        self.syn_incidence.push(weight);
     }
 
     pub fn get_num_connected(&self) -> &[Idx] {
-        debug_assert!(self.clean_);
-        return self.den_num_connected_.as_slice();
+        debug_assert!(self.clean);
+        return self.den_num_connected.as_slice();
     }
 
     /// Randomly sample the active axons.
@@ -101,7 +102,7 @@ impl Synapses {
         F: FnMut() -> f32,
     {
         let mut rng = rand::thread_rng();
-        let synapses = &self.den_synapses_[dendrite as usize];
+        let synapses = &self.den_synapses[dendrite as usize];
         let num_syn = synapses.len();
         let num_grow = max_grow.min(max_total - num_syn);
         let sample = axons.sparse().choose_multiple(&mut rng, num_grow);
@@ -126,7 +127,7 @@ impl Synapses {
         // Hash the dendrite-axon pair into a stable, unique, and psuedo-random number.
         // Use that number to decide which synapses are potentially connected.
         let mut hash_state = DefaultHasher::new();
-        self.seed_.hash(&mut hash_state);
+        self.seed.hash(&mut hash_state);
         dendrite.hash(&mut hash_state);
         for &axon in axons.sparse() {
             let mut syn_hash_state = hash_state.clone();
@@ -152,44 +153,41 @@ impl Synapses {
         let mut connected = vec![0; self.num_dendrites()];
 
         for &axon in activity.sparse().iter() {
-            for syn in self.axn_syn_ranges_[axon as usize].clone() {
-                let dend = self.syn_dendrites_[syn as usize];
-                let perm = self.syn_permanences_[syn as usize];
-                potential[dend as usize] += 1;
-                if perm >= 0.5 {
+            for syn in self.axn_syn_ranges[axon as usize].clone() {
+                let dend = self.syn_dendrites[syn as usize];
+                let permanence = self.syn_incidence[syn as usize];
+                if permanence >= self.incidence_rate {
                     connected[dend as usize] += 1;
                 }
+                potential[dend as usize] += 1;
             }
         }
         return (potential, connected);
     }
 
-    pub fn hebbian(&mut self, presyn: &mut SDR, postsyn: &mut SDR, incr: f32, decr: f32) {
-        assert!(presyn.num_cells() == self.num_axons());
-        assert!(postsyn.num_cells() == self.num_dendrites());
+    pub fn learn(&mut self, axons: &mut SDR, dendrites: &mut SDR, period: f32) {
+        assert!(axons.num_cells() == self.num_axons());
+        assert!(dendrites.num_cells() == self.num_dendrites());
         self.clean();
-        let presyn = presyn.dense();
-        for &dend in postsyn.sparse() {
-            for &syn in &self.den_synapses_[dend as usize] {
-                let axon = self.syn_axons_[syn as usize];
-                let presyn_active = presyn[axon as usize];
-                let permanence = &mut self.syn_permanences_[syn as usize];
-                let old_state = *permanence >= 0.5;
-                *permanence += if presyn_active { incr } else { decr };
-                let new_state = *permanence >= 0.5;
-                if old_state != new_state {
-                    if new_state {
-                        self.den_num_connected_[dend as usize] += 1;
-                    } else {
-                        self.den_num_connected_[dend as usize] -= 1;
-                    }
-                }
+        let alpha = 1.0 - (-1.0 / period).exp();
+        // dbg!(alpha);
+        let axons = axons.dense();
+        for &dend in dendrites.sparse() {
+            let mut sum_weights = 0;
+            for &syn in &self.den_synapses[dend as usize] {
+                let axon = self.syn_axons[syn as usize];
+                let axon_active = axons[axon as usize];
+                let weight = &mut self.syn_incidence[syn as usize];
+                let target = if axon_active { 1.0 } else { 0.0 };
+                *weight += alpha * (target - *weight);
+                sum_weights += if *weight > self.incidence_rate { 1 } else { 0 };
             }
+            self.den_num_connected[dend as usize] = sum_weights;
         }
     }
 
     fn clean(&mut self) {
-        if self.clean_ {
+        if self.clean {
             return;
         }
 
@@ -197,44 +195,44 @@ impl Synapses {
         self.rebuild_axons();
         self.rebuild_dendrites();
 
-        self.clean_ = true;
+        self.clean = true;
     }
 
     fn sort_synapses(&mut self) {
         // Rearrange the synapses into a new order.
-        let mut syn_order = (0..self.num_syn_).into_iter();
+        let mut syn_order = (0..self.num_synapses as Idx).into_iter();
 
         // Remove the dead synapses from consideration.
-        let mut syn_order = syn_order.filter(|&syn| self.syn_permanences_[syn as usize] != 0.0);
+        let mut syn_order = syn_order.filter(|&syn| self.syn_incidence[syn as usize] != 0.0);
 
         // Sort the synapses by presynaptic axon and then postsynaptic dendrite.
         let mut syn_order: Vec<_> = syn_order.collect();
-        syn_order.sort_by_key(|&syn| (self.syn_axons_[syn as usize], self.syn_dendrites_[syn as usize]));
+        syn_order.sort_by_key(|&syn| (self.syn_axons[syn as usize], self.syn_dendrites[syn as usize]));
 
         // Filter out duplicate synapses, keep the oldest synapse, remove the rest.
         // Sort and dedup each axon's synapses by dendrite.
-        syn_order.dedup_by_key(|&mut syn| (self.syn_dendrites_[syn as usize], self.syn_axons_[syn as usize]));
+        syn_order.dedup_by_key(|&mut syn| (self.syn_dendrites[syn as usize], self.syn_axons[syn as usize]));
 
         // Move the synapses into their new postitions.
-        self.num_syn_ = syn_order.len() as Idx;
-        self.syn_axons_ = syn_order.iter().map(|&x| self.syn_axons_[x as usize]).collect();
-        self.syn_dendrites_ = syn_order.iter().map(|&x| self.syn_dendrites_[x as usize]).collect();
-        self.syn_permanences_ = syn_order.iter().map(|&x| self.syn_permanences_[x as usize]).collect();
+        self.num_synapses = syn_order.len();
+        self.syn_axons = syn_order.iter().map(|&x| self.syn_axons[x as usize]).collect();
+        self.syn_dendrites = syn_order.iter().map(|&x| self.syn_dendrites[x as usize]).collect();
+        self.syn_incidence = syn_order.iter().map(|&x| self.syn_incidence[x as usize]).collect();
     }
 
     fn rebuild_axons(&mut self) {
         // Scan for contiguous ranges of synaspes from the same axon.
-        self.axn_syn_ranges_ = Vec::with_capacity(self.num_axons());
+        self.axn_syn_ranges = Vec::with_capacity(self.num_axons());
         let mut start_syn: Idx = 0;
-        if !self.syn_axons_.is_empty() {
+        if !self.syn_axons.is_empty() {
             let mut cur_axon = 0;
-            for syn in 0..self.num_syn_ {
-                let axon = self.syn_axons_[syn as usize];
+            for syn in 0..self.num_synapses() as Idx {
+                let axon = self.syn_axons[syn as usize];
                 if axon != cur_axon {
                     // Terminate this contiguous stretch.
-                    self.axn_syn_ranges_.push(start_syn..syn);
-                    while (self.axn_syn_ranges_.len() as Idx) < axon {
-                        self.axn_syn_ranges_.push(start_syn..start_syn);
+                    self.axn_syn_ranges.push(start_syn..syn);
+                    while (self.axn_syn_ranges.len() as Idx) < axon {
+                        self.axn_syn_ranges.push(start_syn..start_syn);
                     }
                     start_syn = syn;
                     cur_axon = axon;
@@ -242,33 +240,33 @@ impl Synapses {
             }
         }
         // Terminate the final range of synapses.
-        self.axn_syn_ranges_.push(start_syn..self.num_syn_);
+        self.axn_syn_ranges.push(start_syn..self.num_synapses() as Idx);
         // Fill in any axons without synapases.
-        self.axn_syn_ranges_
-            .resize(self.num_axons(), self.num_syn_..self.num_syn_);
+        self.axn_syn_ranges
+            .resize(self.num_axons(), self.num_synapses() as Idx..self.num_synapses() as Idx);
     }
 
     fn rebuild_dendrites(&mut self) {
         // Update the lists of synapse indices.
-        for synapse_list in &mut self.den_synapses_ {
+        for synapse_list in &mut self.den_synapses {
             synapse_list.clear(); // Reuse the memory allocations if possible.
         }
-        self.den_synapses_.resize(self.num_dendrites(), vec![]);
+        self.den_synapses.resize(self.num_dendrites(), vec![]);
         for syn in 0..self.num_synapses() {
-            let dend = self.syn_dendrites_[syn] as usize;
-            self.den_synapses_[dend].push(syn as Idx);
+            let dend = self.syn_dendrites[syn] as usize;
+            self.den_synapses[dend].push(syn as Idx);
         }
 
         // Count the number of connected synapses.
-        if self.den_num_connected_.capacity() < self.num_dendrites() {
-            self.den_num_connected_ = vec![0; self.num_dendrites()];
+        if self.den_num_connected.capacity() < self.num_dendrites() {
+            self.den_num_connected = vec![0; self.num_dendrites()];
         } else {
-            self.den_num_connected_.fill(0);
-            self.den_num_connected_.resize(self.num_dendrites(), 0);
+            self.den_num_connected.fill(0);
+            self.den_num_connected.resize(self.num_dendrites(), 0);
         }
         for syn in 0..self.num_synapses() {
-            if self.syn_permanences_[syn] >= 0.5 {
-                self.den_num_connected_[self.syn_dendrites_[syn] as usize] += 1;
+            if self.syn_incidence[syn] >= 0.5 {
+                self.den_num_connected[self.syn_dendrites[syn] as usize] += 1;
             }
         }
     }
@@ -276,17 +274,20 @@ impl Synapses {
 
 impl std::fmt::Debug for Synapses {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.clean_ {
-            // todo also calc the statistics for num synapses on dendrite, and num synapses on axon.
-        }
         write!(
             f,
             "Synapses (Axons: {}, Dendrites: {}, Synapses: {}, clean={})",
             self.num_axons(),
             self.num_dendrites(),
             self.num_synapses(),
-            self.clean_,
-        )
+            self.clean,
+        );
+        if self.clean {
+            // todo also calc the statistics for num synapses on dendrite, and num synapses on axon.
+            let mean_perm = self.syn_incidence.iter().sum::<f32>() / self.num_synapses() as f32;
+            write!(f, "\n    Syn Perm Mean {}", mean_perm);
+        }
+        Ok(())
     }
 }
 
@@ -296,7 +297,7 @@ mod tests {
 
     #[test]
     fn basic() {
-        let mut x = Synapses::new();
+        let mut x = Synapses::new(0.5, None);
         assert_eq!(x.add_axons(10), 0..10);
         assert_eq!(x.add_dendrites(10), 0..10);
         let mut weights = [0.6, 0.4, 0.5].into_iter();
@@ -315,26 +316,42 @@ mod tests {
         x.activate(&mut SDR::ones(10));
 
         dbg!(&x);
-        dbg!(&x.axn_syn_ranges_);
-        dbg!(&x.syn_axons_);
-        dbg!(&x.syn_dendrites_);
-        dbg!(&x.syn_permanences_);
-        dbg!(&x.den_synapses_);
-        dbg!(&x.den_num_connected_);
+        dbg!(&x.axn_syn_ranges);
+        dbg!(&x.syn_axons);
+        dbg!(&x.syn_dendrites);
+        dbg!(&x.syn_incidence);
+        dbg!(&x.den_synapses);
+        dbg!(&x.den_num_connected);
         // panic!("END OF TEST");
     }
 
     #[test]
-    fn hebbian() {
-        let mut x = Synapses::new();
-        x.add_axons(2);
-        x.add_dendrites(1);
-        x.clean(); // :(
-        x.grow_selective(&mut SDR::ones(2), 0, 10, 10, || 0.5);
-        let mut pattern = SDR::from_dense(vec![false, true]);
-        x.hebbian(&mut pattern, &mut SDR::ones(1), 0.1, -0.1);
-        let (pot, con) = x.activate(&mut SDR::ones(2));
-        assert_eq!(pot, [2]);
-        assert_eq!(con, [1]);
+    fn learn() {
+        let num_syn = 10;
+        let mut x = Synapses::new(0.5, None);
+        x.add_axons(num_syn);
+        x.add_dendrites(num_syn);
+        for syn in 0..num_syn {
+            x.add_synapse(syn as Idx, syn as Idx, f32::EPSILON);
+        }
+
+        let inp_sdr = || {
+            SDR::from_dense(
+                (0..num_syn)
+                    .map(|x| rand::random::<f32>() < x as f32 / num_syn as f32)
+                    .collect(),
+            )
+        };
+
+        for train in 0..10_000 {
+            x.learn(&mut inp_sdr(), &mut SDR::ones(num_syn), 1000.0);
+        }
+        dbg!(&x.syn_incidence);
+
+        let atol = 0.05;
+        for (idx, &x) in x.syn_incidence.iter().enumerate() {
+            let exact = idx as f32 / num_syn as f32;
+            assert!(exact - atol <= x && x <= exact + atol);
+        }
     }
 }

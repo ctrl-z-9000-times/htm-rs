@@ -11,7 +11,7 @@ pub struct SpatialPooler {
     coincidence_ratio: f32,
     homeostatic_period: f32,
 
-    syn: Synapses,
+    pub syn: Synapses,
     af: Vec<f32>,
 }
 
@@ -28,7 +28,7 @@ impl SpatialPooler {
         coincidence_ratio: f32,
         homeostatic_period: f32,
     ) -> Self {
-        let mut syn = Synapses::new();
+        let mut syn = Synapses::new(1.0 / coincidence_ratio, None);
         syn.add_dendrites(num_cells);
         let sparsity = num_active as f32 / num_cells as f32;
         return Self {
@@ -132,6 +132,7 @@ impl SpatialPooler {
     fn update_af(&mut self, activity: &mut SDR) {
         let decay = (-1.0f32 / self.homeostatic_period).exp();
         let alpha = 1.0 - decay;
+        // dbg!(alpha, decay);
         for (frq, state) in self.af.iter_mut().zip(activity.dense().iter()) {
             *frq += alpha * (*state as usize as f32 - *frq);
         }
@@ -167,14 +168,7 @@ pub fn learn(
     coincidence_ratio: f32,
     potential_pct: f32,
 ) {
-    // Hebbian Learning.
-    let incr = 1.0 / learning_period;
-    let decr = if coincidence_ratio != 0.0 {
-        -incr / coincidence_ratio
-    } else {
-        -1.0
-    };
-    synapses.hebbian(inputs, activity, incr, decr);
+    synapses.learn(inputs, activity, learning_period);
     // Grow new synapses.
     for &dend in activity.sparse() {
         synapses.grow_competitive(inputs, dend, potential_pct, || 0.5);
@@ -220,6 +214,7 @@ mod tests {
         for _trial in 0..10 {
             let mut inp3 = make_sdr();
             let mut c = sp.advance(&mut inp3, true);
+            dbg!(a.percent_overlap(&mut c));
             assert!(a.percent_overlap(&mut c) < 0.5);
         }
     }

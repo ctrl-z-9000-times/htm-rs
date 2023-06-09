@@ -370,10 +370,18 @@ impl Stats {
         return self.var_sparsity_.sqrt();
     }
     pub fn min_frequency(&self) -> f32 {
-        return self.frequencies_.iter().fold(f32::NAN, |a, &b| a.min(b));
+        if self.num_samples_ == 0 {
+            return f32::NAN;
+        } else {
+            return self.frequencies_.iter().fold(f32::NAN, |a, &b| a.min(b));
+        }
     }
     pub fn max_frequency(&self) -> f32 {
-        return self.frequencies_.iter().fold(f32::NAN, |a, &b| a.max(b));
+        if self.num_samples_ == 0 {
+            return f32::NAN;
+        } else {
+            return self.frequencies_.iter().fold(f32::NAN, |a, &b| a.max(b));
+        }
     }
     pub fn mean_frequency(&self) -> f32 {
         if self.num_samples_ == 0 {
