@@ -70,15 +70,13 @@ impl SpatialPooler {
     }
 
     fn __str__(&self) -> String {
-        return format!(
-            "SpatialPooler {{ num_cells: {}, num_active {} }}\n    {:?}",
-            self.num_cells, self.num_active, self.syn
-        );
+        return format!("{}", self);
     }
 
     pub fn reset(&mut self) {
         self.buffer = vec![SDR::zeros(0); self.num_steps()];
         self.syn.reset();
+        self.syn.clean();
     }
 
     pub fn advance(&mut self, inputs: &mut SDR, learn: bool, output: Option<&mut SDR>) -> SDR {
@@ -95,10 +93,12 @@ impl SpatialPooler {
             .collect();
 
         // Apply homeostatic control based on the cell activation frequency.
-        let sparsity = self.num_active as f32 / self.num_cells as f32;
-        let boost_factor_adjust = 1.0 / sparsity.log2();
-        for (x, f) in activity.iter_mut().zip(&self.af) {
-            *x = *x * f.log2() * boost_factor_adjust;
+        if self.homeostatic_period.is_some() {
+            let sparsity = self.num_active as f32 / self.num_cells as f32;
+            let boost_factor_adjust = 1.0 / sparsity.log2();
+            for (x, f) in activity.iter_mut().zip(&self.af) {
+                *x = *x * f.log2() * boost_factor_adjust;
+            }
         }
 
         // Run the Winner-Takes-All Competition.
@@ -115,12 +115,9 @@ impl SpatialPooler {
 
         let mut activity = SDR::from_sparse(self.num_cells, sparse);
 
-        if learn {
-            self.update_af(&mut activity);
-
+        if let Some(output) = output {
             // Learn the association: input[t-num_steps] -> output[t]
             if self.num_steps() > 0 {
-                assert!(output.is_some());
                 std::mem::swap(inputs, &mut self.buffer[self.step]);
                 self.step = (self.step + 1) % self.num_steps(); // Rotate our index into the circular buffer.
                 if inputs.num_cells() == 0 {
@@ -128,18 +125,27 @@ impl SpatialPooler {
                 }
             }
 
+            self.syn.learn(inputs, output, self.learning_period);
+
+            // Grow new synapses.
+            for &dend in output.sparse() {
+                self.syn
+                    .grow_competitive(inputs, dend, self.potential_pct, || self.incidence_rate);
+            }
+
+            // Depress the synapses leading to the incorrect outputs.
+            // let incorrect = active - output;
+            // self.syn.hebbian(&mut input, &mut incorrect, decr, 0.0);
+            //
+        } else if learn {
+            self.update_af(&mut activity);
+
             self.syn.learn(inputs, &mut activity, self.learning_period);
 
             // Grow new synapses.
             for &dend in activity.sparse() {
                 self.syn
                     .grow_competitive(inputs, dend, self.potential_pct, || self.incidence_rate);
-            }
-
-            if output.is_some() {
-                // Depress the synapses leading to the incorrect outputs.
-                // let incorrect = active - output;
-                // self.syn.hebbian(&mut input, &mut incorrect, decr, 0.0);
             }
         };
         return activity;
@@ -200,6 +206,13 @@ fn cmp_f32(a: f32, b: f32) -> std::cmp::Ordering {
     }
 }
 
+impl std::fmt::Display for SpatialPooler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Spatial Pooler {}", self.syn,);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,7 +231,7 @@ mod tests {
             0,
         );
         sp.reset();
-        dbg!(&sp.syn);
+        println!("{}", &sp);
         //
         let mut inp1 = make_sdr();
         for _train in 0..10 {
@@ -245,33 +258,33 @@ mod tests {
         }
     }
 
-    /*
     #[test]
     fn prediction() {
-        // Make an artificial sequence of SDRs to demonstrate the predictor.
+        // Make an artificial sequence of SDRs to demonstrate the supervised predictor capabilities.
+        let seq_len = 10;
         let delay = 3;
         let num_cells = 2000;
         let num_active = 40;
         let input_sdr = || SDR::random(100_000, 0.001);
         let output_sdr = || SDR::random(num_cells, num_active as f32 / num_cells as f32);
-        let mut nn = PurkinjeCells::new(
-            delay,      // num_steps
+        let mut input_seq: Vec<SDR> = (0..seq_len).map(|_| input_sdr()).collect();
+        let mut output_seq: Vec<SDR> = (0..seq_len).map(|_| output_sdr()).collect();
+
+        let mut nn = SpatialPooler::new(
             num_cells,  // num_cells
             num_active, // num_active
             10,         // active_thresh
             0.3,        // potential_pct
             10.0,       // learning_period
             0.01,       // incidence_rate
+            None,       // homeostatic_period
+            delay,      // num_steps
         );
-
-        let seq_len = if cfg!(debug_assertions) { 10 } else { 1000 };
-        let mut input_seq: Vec<SDR> = (0..seq_len).map(|_| input_sdr()).collect();
-        let mut output_seq: Vec<SDR> = (0..seq_len).map(|_| output_sdr()).collect();
 
         // Train.
         for trial in 0..10 {
             for t in 0..seq_len {
-                nn.advance(input_seq[t].clone(), Some(output_seq[t].clone()));
+                nn.advance(&mut input_seq[t].clone(), true, Some(&mut output_seq[t].clone()));
             }
         }
 
@@ -280,19 +293,19 @@ mod tests {
         nn.reset();
 
         for noise in 0..3 * seq_len {
-            nn.advance(input_sdr(), Some(output_sdr()));
+            nn.advance(&mut input_sdr(), true, Some(&mut output_sdr()));
         }
 
         // Test.
-        dbg!(&nn.syn);
+        nn.syn.clean();
+        println!("{}", &nn);
 
         for t in 0..seq_len {
-            let mut prediction = nn.advance(input_seq[t].clone(), None);
+            let mut prediction = nn.advance(&mut input_seq[t].clone(), false, None);
             let correct = &mut output_seq[(t + delay) % seq_len];
             let mut overlap = prediction.percent_overlap(correct);
             dbg!(overlap);
             assert!(overlap >= 0.90);
         }
     }
-    */
 }

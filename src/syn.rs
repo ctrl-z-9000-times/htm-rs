@@ -180,13 +180,13 @@ impl Synapses {
                 let weight = &mut self.syn_incidence[syn as usize];
                 let target = if axon_active { 1.0 } else { 0.0 };
                 *weight += alpha * (target - *weight);
-                sum_weights += if *weight > self.incidence_rate { 1 } else { 0 };
+                sum_weights += if *weight >= self.incidence_rate { 1 } else { 0 };
             }
             self.den_num_connected[dend as usize] = sum_weights;
         }
     }
 
-    fn clean(&mut self) {
+    pub fn clean(&mut self) {
         if self.clean {
             return;
         }
@@ -272,22 +272,63 @@ impl Synapses {
     }
 }
 
+fn mean_std(data: &[f32]) -> (f32, f32) {
+    let mean: f32 = data.iter().sum::<f32>() / data.len() as f32;
+    let var: f32 = data.iter().map(|&x| (x - mean).powi(2)).sum::<f32>() / data.len() as f32;
+    return (mean, var.sqrt());
+}
+
 impl std::fmt::Debug for Synapses {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Synapses (Axons: {}, Dendrites: {}, Synapses: {}, clean={})",
+            "Synapses ({} Axons, {} Dendrites, {} Synapses)",
             self.num_axons(),
             self.num_dendrites(),
             self.num_synapses(),
-            self.clean,
         );
         if self.clean {
-            // todo also calc the statistics for num synapses on dendrite, and num synapses on axon.
-            let mean_perm = self.syn_incidence.iter().sum::<f32>() / self.num_synapses() as f32;
-            write!(f, "\n    Syn Perm Mean {}", mean_perm);
+            let con_count: Vec<_> = self
+                .den_synapses
+                .iter()
+                .map(|x| {
+                    x.iter()
+                        .map(|&s| (self.syn_incidence[s as usize] >= self.incidence_rate) as u32 as f32)
+                        .sum::<f32>()
+                })
+                .collect();
+            let pot_count: Vec<_> = self.den_synapses.iter().map(|x| x.len() as f32).collect();
+
+            let (con_mean, con_std) = mean_std(&con_count);
+            let (pot_mean, pot_std) = mean_std(&pot_count);
+
+            // dendrite synapse counts, connected counts
+            // min max mean std
+            writeln!(f, "\n           |  min  |  max  |  mean |  std  |",)?;
+            writeln!(
+                f,
+                "Connected  | {:^5} | {:^5} | {:>5.1} | {:>5.1} |",
+                con_count.iter().fold(f32::NAN, |a, b| a.min(*b)),
+                con_count.iter().fold(f32::NAN, |a, b| a.max(*b)),
+                con_mean,
+                con_std
+            )?;
+            writeln!(
+                f,
+                "Potential  | {:^5} | {:^5} | {:>5.1} | {:>5.1} |",
+                pot_count.iter().fold(f32::NAN, |a, b| a.min(*b)),
+                pot_count.iter().fold(f32::NAN, |a, b| a.max(*b)),
+                pot_mean,
+                pot_std
+            )?;
         }
         Ok(())
+    }
+}
+// Display message is the same as Debug message.
+impl std::fmt::Display for Synapses {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self,)
     }
 }
 

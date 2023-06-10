@@ -110,7 +110,7 @@ impl Cerebellum {
         assert!(inputs.len() == self.num_inputs());
         let learn = outputs.is_some();
 
-        // Encode the inputs.
+        // Encode the inputs into SDRs.
         let mut input_sdr: Vec<_> = inputs
             .iter()
             .zip(&self.input_adapters)
@@ -138,10 +138,14 @@ impl Cerebellum {
                 purkinje_fibers.push(cells.advance(&mut parallel_fibers, false, None));
             }
         }
-        for (sdr, stats) in purkinje_fibers.iter_mut().zip(&mut self.purkinje_fibers) {
-            stats.update(sdr);
+        // Update the purkinje fiber statistics.
+        if learn {
+            for (sdr, stats) in purkinje_fibers.iter_mut().zip(&mut self.purkinje_fibers) {
+                stats.update(sdr);
+            }
         }
-        //
+
+        // Decode the purkinje cell outputs real values for the user.
         let mut predictions = Vec::with_capacity(self.num_outputs());
         for (sdr, adapter) in purkinje_fibers.iter_mut().zip(&self.output_adapters) {
             let (mut value, confidence) = adapter.decode(sdr);
@@ -157,12 +161,13 @@ impl Cerebellum {
 impl std::fmt::Display for Cerebellum {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Cerebellum",)?;
-        writeln!(f, "MF -> GC {:?}", self.granule_cells.syn,)?;
+        writeln!(f, "Granule Cell {}", self.granule_cells,)?;
         writeln!(f, "Parallel Fibers {}", self.parallel_fibers,)?;
 
         for pf in 0..self.num_outputs() {
-            writeln!(f, "{}: GC -> PC {:?}", pf, self.purkinje_cells[pf].syn,)?;
-            writeln!(f, "{}: Purkinje Fibers {}", pf, self.purkinje_fibers[pf],)?;
+            writeln!(f, "Output: {}", pf)?;
+            writeln!(f, "{}", self.purkinje_cells[pf],)?;
+            writeln!(f, "{}", self.purkinje_fibers[pf],)?;
         }
         Ok(())
     }
@@ -202,14 +207,16 @@ mod tests {
 
         let inp = vec![rand::random()];
         let out = vec![rand::random()];
-        // let nan = x.advance(&inp, Some(&out));
-        // assert!(nan[0].is_nan());
-        let pred = x.advance(&inp, Some(&out));
-        let pred = x.advance(&inp, Some(&out));
+        let nan = x.advance(&inp, Some(&out));
+        assert!(nan[0].is_nan());
+        for _train in 0..2 {
+            x.advance(&inp, Some(&out));
+        }
         let pred = x.advance(&inp, Some(&out));
 
         println!("{}", &x);
         dbg!(pred[0], out[0]);
         assert!(err(&pred, &out) < 0.02);
+        // panic!()
     }
 }
