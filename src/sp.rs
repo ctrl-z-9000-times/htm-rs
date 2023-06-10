@@ -1,4 +1,4 @@
-use crate::{Idx, Synapses, SDR};
+use crate::{Idx, Stats, Synapses, SDR};
 use pyo3::prelude::*;
 
 #[pyclass]
@@ -276,15 +276,17 @@ mod tests {
             10,         // active_thresh
             0.3,        // potential_pct
             10.0,       // learning_period
-            0.01,       // incidence_rate
+            0.05,       // incidence_rate
             None,       // homeostatic_period
             delay,      // num_steps
         );
+        let mut stats = Stats::new(1000.0);
 
         // Train.
         for trial in 0..10 {
             for t in 0..seq_len {
-                nn.advance(&mut input_seq[t].clone(), true, Some(&mut output_seq[t].clone()));
+                let mut x = nn.advance(&mut input_seq[t].clone(), true, Some(&mut output_seq[t].clone()));
+                stats.update(&mut x);
             }
         }
 
@@ -299,6 +301,7 @@ mod tests {
         // Test.
         nn.syn.clean();
         println!("{}", &nn);
+        println!("{}", &stats);
 
         for t in 0..seq_len {
             let mut prediction = nn.advance(&mut input_seq[t].clone(), false, None);

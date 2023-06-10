@@ -38,7 +38,7 @@ impl Cerebellum {
             .map(|(min, max, res)| Encoder::new_scalar(input_num_active, *min, *max, *res))
             .collect();
         let num_mossy_fibers: usize = input_adapters.iter().map(|enc| enc.num_cells()).sum();
-        let mossy_fibers = Stats::new(num_mossy_fibers, 100.0);
+        let mossy_fibers = Stats::new(100.0);
         //
         let mut granule_cells = SpatialPooler::new(
             granule_num_cells,
@@ -50,7 +50,7 @@ impl Cerebellum {
             Some(granule_homeostatic_period),
             0,
         );
-        let parallel_fibers = Stats::new(granule_cells.num_cells(), 100.0);
+        let parallel_fibers = Stats::new(100.0);
         //
         let output_adapters: Vec<_> = output_spec
             .iter()
@@ -70,7 +70,7 @@ impl Cerebellum {
                 None,
                 num_steps,
             ));
-            purkinje_fibers.push(Stats::new(enc.num_cells(), 100.0));
+            purkinje_fibers.push(Stats::new(100.0));
         }
         //
         return Self {

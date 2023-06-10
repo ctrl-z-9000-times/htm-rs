@@ -269,7 +269,7 @@ impl std::fmt::Display for SDR {
 ///
 #[pyclass]
 pub struct Stats {
-    num_cells_: Idx,
+    num_cells_: usize,
     num_samples_: usize,
     period_: f32,
 
@@ -291,17 +291,17 @@ pub struct Stats {
 #[pymethods]
 impl Stats {
     #[new]
-    pub fn new(num_cells: usize, period: f32) -> Self {
+    pub fn new(period: f32) -> Self {
         return Stats {
-            num_cells_: num_cells as Idx,
+            num_cells_: 0,
             num_samples_: 0,
             period_: period,
-            frequencies_: vec![0.0; num_cells],
+            frequencies_: vec![],
             min_sparsity_: f32::NAN,
             max_sparsity_: f32::NAN,
             mean_sparsity_: f32::NAN,
             var_sparsity_: f32::NAN,
-            previous_sdr_: SDR::zeros(num_cells),
+            previous_sdr_: SDR::zeros(0),
             min_overlap_: f32::NAN,
             max_overlap_: f32::NAN,
             mean_overlap_: f32::NAN,
@@ -311,13 +311,19 @@ impl Stats {
 
     pub fn update(&mut self, sdr: &mut SDR) {
         if self.num_samples_ == 0 {
+            self.num_cells_ = sdr.num_cells();
+            self.frequencies_ = vec![0.0; self.num_cells()];
+            self.previous_sdr_ = SDR::zeros(self.num_cells());
             self.mean_sparsity_ = 0.0;
             self.var_sparsity_ = 0.0;
             self.mean_overlap_ = 0.0;
             self.var_overlap_ = 0.0;
+        } else {
+            assert!(sdr.num_cells() == self.num_cells());
         }
         let decay = (-1.0 / self.period_.min(self.num_samples_ as f32)).exp();
         let alpha = 1.0 - decay;
+        // dbg!(alpha, decay);
         self.num_samples_ += 1;
 
         // Update the activation frequency data.
