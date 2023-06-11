@@ -33,6 +33,10 @@ impl SDR {
 
     #[staticmethod]
     pub fn random(num_cells: usize, sparsity: f32) -> Self {
+        if num_cells == 0 {
+            return SDR::zeros(num_cells);
+        }
+        assert!(0.0 <= sparsity && sparsity <= 1.0);
         // TODO: Consider changing sparsity into num_active, since I think
         // that's more intuitive for the users and it more directly translates
         // into the source code.
@@ -357,6 +361,9 @@ impl Stats {
         self.previous_sdr_ = SDR::zeros(self.num_cells());
     }
 
+    pub fn period(&self) -> f32 {
+        return self.period_;
+    }
     pub fn num_cells(&self) -> usize {
         return self.num_cells_ as usize;
     }
@@ -458,27 +465,27 @@ impl std::fmt::Debug for Stats {
         writeln!(f, "           |  min  |  max  |  mean |  std  |",)?;
         writeln!(
             f,
-            "Sparsity   | {:.3} | {:.3} | {:.3} | {:.3} |",
-            self.min_sparsity(),
-            self.max_sparsity(),
-            self.mean_sparsity(),
-            self.std_sparsity()
+            "Sparsity   | {:>5.2} | {:>5.2} | {:>5.2} | {:>5.2} |",
+            100.0 * self.min_sparsity(),
+            100.0 * self.max_sparsity(),
+            100.0 * self.mean_sparsity(),
+            100.0 * self.std_sparsity()
         )?;
         writeln!(
             f,
-            "Frequency  | {:.3} | {:.3} | {:.3} | {:.3} |",
-            self.min_frequency(),
-            self.max_frequency(),
-            self.mean_frequency(),
-            self.std_frequency()
+            "Frequency  | {:>5.2} | {:>5.2} | {:>5.2} | {:>5.2} |",
+            100.0 * self.min_frequency(),
+            100.0 * self.max_frequency(),
+            100.0 * self.mean_frequency(),
+            100.0 * self.std_frequency()
         )?;
         writeln!(
             f,
-            "Overlap    | {:.3} | {:.3} | {:.3} | {:.3} |",
-            self.min_overlap(),
-            self.max_overlap(),
-            self.mean_overlap(),
-            self.std_overlap()
+            "Overlap    | {:>5.2} | {:>5.2} | {:>5.2} | {:>5.2} |",
+            100.0 * self.min_overlap(),
+            100.0 * self.max_overlap(),
+            100.0 * self.mean_overlap(),
+            100.0 * self.std_overlap()
         )?;
         writeln!(f, "Entropy: {:.1}%", (self.entropy() * 100.0))
     }

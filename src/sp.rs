@@ -79,7 +79,7 @@ impl SpatialPooler {
         self.syn.clean();
     }
 
-    pub fn advance(&mut self, inputs: &mut SDR, learn: bool, output: Option<&mut SDR>) -> SDR {
+    pub fn advance(&mut self, mut inputs: &mut SDR, learn: bool, output: Option<&mut SDR>) -> SDR {
         assert!(output.is_none() || learn);
         self.lazy_init(inputs);
 
@@ -89,7 +89,8 @@ impl SpatialPooler {
         let mut activity: Vec<_> = connected
             .iter()
             .zip(self.syn.get_num_connected())
-            .map(|(&x, &nsyn)| if x == 0 { 0.0 } else { (x as f32) / (nsyn as f32) })
+            // .map(|(&x, &nsyn)| if x == 0 { 0.0 } else { (x as f32) / (nsyn as f32) })
+            .map(|(&x, &nsyn)| (x as f32))
             .collect();
 
         // Apply homeostatic control based on the cell activation frequency.
@@ -115,22 +116,17 @@ impl SpatialPooler {
 
         let mut activity = SDR::from_sparse(self.num_cells, sparse);
 
+        // Learn the association: input[t-num_steps] -> output[t]
         if let Some(output) = output {
-            // Learn the association: input[t-num_steps] -> output[t]
             if self.num_steps() > 0 {
-                std::mem::swap(inputs, &mut self.buffer[self.step]);
+                let mut prev_inputs = std::mem::replace(&mut self.buffer[self.step], inputs.clone());
                 self.step = (self.step + 1) % self.num_steps(); // Rotate our index into the circular buffer.
-                if inputs.num_cells() == 0 {
-                    *inputs = SDR::zeros(self.num_inputs());
+                if prev_inputs.num_cells() == 0 {
+                    prev_inputs = SDR::zeros(self.num_inputs());
                 }
-            }
-
-            self.syn.learn(inputs, output, self.learning_period);
-
-            // Grow new synapses.
-            for &dend in output.sparse() {
-                self.syn
-                    .grow_competitive(inputs, dend, self.potential_pct, || self.incidence_rate);
+                self.learn(&mut prev_inputs, output);
+            } else {
+                self.learn(inputs, output);
             }
 
             // Depress the synapses leading to the incorrect outputs.
@@ -138,15 +134,7 @@ impl SpatialPooler {
             // self.syn.hebbian(&mut input, &mut incorrect, decr, 0.0);
             //
         } else if learn {
-            self.update_af(&mut activity);
-
-            self.syn.learn(inputs, &mut activity, self.learning_period);
-
-            // Grow new synapses.
-            for &dend in activity.sparse() {
-                self.syn
-                    .grow_competitive(inputs, dend, self.potential_pct, || self.incidence_rate);
-            }
+            self.learn(inputs, &mut activity);
         };
         return activity;
     }
@@ -172,13 +160,26 @@ impl SpatialPooler {
     }
 
     fn activate_least_used(&self, sparse: &mut Vec<Idx>, num_active: usize) {
-        if sparse.len() < num_active {
+        if sparse.len() < num_active && self.homeostatic_period.is_some() {
             let num_new = num_active - sparse.len();
             // Select the cells with the lowest activation frequency.
             let mut min_af: Vec<_> = (0..self.num_cells as Idx).collect();
             min_af.select_nth_unstable_by(num_new, |&x, &y| cmp_f32(self.af[x as usize], self.af[y as usize]));
             min_af.resize(num_new, 0);
             sparse.append(&mut min_af);
+        }
+    }
+
+    fn learn(&mut self, inputs: &mut SDR, activity: &mut SDR) {
+        self.update_af(activity);
+
+        // Hebbian learning.
+        self.syn.learn(inputs, activity, self.learning_period);
+
+        // Grow new synapses.
+        for &dend in activity.sparse() {
+            self.syn
+                .grow_competitive(inputs, dend, self.potential_pct, || self.incidence_rate);
         }
     }
 
@@ -263,29 +264,33 @@ mod tests {
         // Make an artificial sequence of SDRs to demonstrate the supervised predictor capabilities.
         let seq_len = 10;
         let delay = 3;
-        let num_cells = 2000;
-        let num_active = 40;
-        let input_sdr = || SDR::random(100_000, 0.001);
-        let output_sdr = || SDR::random(num_cells, num_active as f32 / num_cells as f32);
-        let mut input_seq: Vec<SDR> = (0..seq_len).map(|_| input_sdr()).collect();
-        let mut output_seq: Vec<SDR> = (0..seq_len).map(|_| output_sdr()).collect();
+        let num_cells = 10000;
+        let num_active = 200;
+        let make_sdr = || SDR::random(num_cells, num_active as f32 / num_cells as f32);
+        let mut sequence: Vec<SDR> = (0..seq_len).map(|_| make_sdr()).collect();
 
         let mut nn = SpatialPooler::new(
             num_cells,  // num_cells
             num_active, // num_active
-            10,         // active_thresh
-            0.3,        // potential_pct
+            5,          // active_thresh
+            0.5,        // potential_pct
             10.0,       // learning_period
             0.05,       // incidence_rate
             None,       // homeostatic_period
             delay,      // num_steps
         );
-        let mut stats = Stats::new(1000.0);
+        let mut stats = Stats::new(100.0);
+
+        // Random init.
+        for noise in 0..10 {
+            nn.advance(&mut make_sdr(), true, Some(&mut make_sdr()));
+            // nn.advance(&mut make_sdr(), false, None);
+        }
 
         // Train.
         for trial in 0..10 {
             for t in 0..seq_len {
-                let mut x = nn.advance(&mut input_seq[t].clone(), true, Some(&mut output_seq[t].clone()));
+                let mut x = nn.advance(&mut sequence[t].clone(), true, Some(&mut sequence[t]));
                 stats.update(&mut x);
             }
         }
@@ -294,8 +299,8 @@ mod tests {
         // learning the random noise.
         nn.reset();
 
-        for noise in 0..3 * seq_len {
-            nn.advance(&mut input_sdr(), true, Some(&mut output_sdr()));
+        for noise in 0..10 {
+            nn.advance(&mut make_sdr(), true, Some(&mut make_sdr()));
         }
 
         // Test.
@@ -304,11 +309,12 @@ mod tests {
         println!("{}", &stats);
 
         for t in 0..seq_len {
-            let mut prediction = nn.advance(&mut input_seq[t].clone(), false, None);
-            let correct = &mut output_seq[(t + delay) % seq_len];
+            let mut prediction = nn.advance(&mut sequence[t].clone(), false, None);
+            let correct = &mut sequence[(t + delay) % seq_len];
             let mut overlap = prediction.percent_overlap(correct);
             dbg!(overlap);
             assert!(overlap >= 0.90);
         }
+        // panic!()
     }
 }
