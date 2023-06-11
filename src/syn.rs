@@ -5,7 +5,9 @@ use std::hash::{Hash, Hasher};
 use std::ops::Range;
 
 pub struct Synapses {
-    incidence_rate: f32,
+    minimum_incidence: f32,
+    connected_incidence: f32,
+    saturated_incidence: f32,
     clean: bool,
     seed: u64,
 
@@ -19,35 +21,47 @@ pub struct Synapses {
     syn_axons: Vec<Idx>,
     syn_dendrites: Vec<Idx>,
     syn_incidence: Vec<f32>,
+    syn_weights: Vec<f32>,
 
     // Parallel arrays of axon data.
     axn_syn_ranges: Vec<Range<Idx>>,
 
     // Parallel arrays of dendrite data.
     den_synapses: Vec<Vec<Idx>>,
-    den_num_connected: Vec<Idx>,
+    den_sum_weights: Vec<f32>,
 }
 
 impl Synapses {
-    pub fn new(incidence_rate: f32, seed: Option<u64>) -> Self {
-        assert!(0.0 <= incidence_rate && incidence_rate <= 1.0);
+    pub fn new(connected_incidence: f32, saturated_incidence: f32, seed: Option<u64>) -> Self {
+        assert!(0.0 <= connected_incidence && connected_incidence <= 1.0);
+        assert!(0.0 <= saturated_incidence && saturated_incidence <= 1.0);
+        assert!(connected_incidence <= saturated_incidence);
+        // let syn_weight_halfway = 0.5 * (saturated_incidence + connected_incidence);
+        // let syn_weight_slope = 1.0 / (saturated_incidence - connected_incidence);
         return Self {
-            incidence_rate: incidence_rate,
+            minimum_incidence: connected_incidence * 0.1,
+            connected_incidence: connected_incidence,
+            saturated_incidence: saturated_incidence,
             clean: false,
-            seed: seed.unwrap_or_else(|| 42), // todo id like to seed on system time or something like that.
+            seed: seed.unwrap_or_else(rand::random),
             num_synapses: 0,
             num_axons: 0,
             num_dendrites: 0,
             syn_axons: vec![],
             syn_dendrites: vec![],
             syn_incidence: vec![],
+            syn_weights: vec![],
             axn_syn_ranges: vec![],
             den_synapses: vec![],
-            den_num_connected: vec![],
+            den_sum_weights: vec![],
         };
     }
 
     pub fn reset(&mut self) {}
+
+    pub fn seed(&self) -> u64 {
+        return self.seed;
+    }
 
     pub fn num_axons(&self) -> usize {
         return self.num_axons;
@@ -72,22 +86,32 @@ impl Synapses {
         self.clean = false;
         let start_range = self.num_dendrites;
         self.num_dendrites += num_dendrites;
+        self.den_sum_weights.resize(self.num_dendrites, 0.0);
         return start_range..self.num_dendrites;
     }
 
-    pub fn add_synapse(&mut self, axon: Idx, dendrite: Idx, weight: f32) {
+    pub fn add_synapse(&mut self, axon: Idx, dendrite: Idx, initial_rate: f32) {
         debug_assert!(axon < self.num_axons() as Idx);
         debug_assert!(dendrite < self.num_dendrites() as Idx);
         self.clean = false;
+        let syn = self.num_synapses;
         self.num_synapses += 1;
         self.syn_axons.push(axon);
         self.syn_dendrites.push(dendrite);
-        self.syn_incidence.push(weight);
+        self.syn_incidence.push(initial_rate);
+        let weight = self.weight_function(initial_rate);
+        self.syn_weights.push(weight);
     }
 
-    pub fn get_num_connected(&self) -> &[Idx] {
+    pub fn weight_function(&self, incidence_rate: f32) -> f32 {
+        let sigmoid_halfway = 0.5 * (self.saturated_incidence + self.connected_incidence);
+        let sigmoid_slope = 1.0 / (self.saturated_incidence - self.connected_incidence);
+        return 1.0 / (1.0 + (-4.0 * sigmoid_slope * (incidence_rate - sigmoid_halfway)).exp());
+    }
+
+    pub fn get_sum_weights(&self) -> &[f32] {
         debug_assert!(self.clean);
-        return self.den_num_connected.as_slice();
+        return self.den_sum_weights.as_slice();
     }
 
     /// Randomly sample the active axons.
@@ -117,10 +141,7 @@ impl Synapses {
     }
 
     ///
-    pub fn grow_competitive<F>(&mut self, axons: &mut SDR, dendrite: Idx, potential_pct: f32, mut weights: F)
-    where
-        F: FnMut() -> f32,
-    {
+    pub fn grow_competitive(&mut self, axons: &mut SDR, dendrite: Idx, potential_pct: f32) {
         // Calculate the potential pool of presynapses for this dendrite.
         let estimated_pool_size = 2 * (potential_pct * axons.num_active() as f32).round() as usize;
         let mut potential_pool = Vec::with_capacity(estimated_pool_size);
@@ -141,25 +162,22 @@ impl Synapses {
         // Make synapses to every axon in the potential pool. This will make
         // duplicate synapses, which will be removed next time it's cleaned.
         for axon in potential_pool {
-            self.add_synapse(axon, dendrite, weights());
+            self.add_synapse(axon, dendrite, self.connected_incidence);
         }
     }
 
-    pub fn activate(&mut self, activity: &mut SDR) -> (Vec<u32>, Vec<u32>) {
+    pub fn activate(&mut self, activity: &mut SDR) -> (Vec<u32>, Vec<f32>) {
         debug_assert!(activity.num_cells() == self.num_axons());
         self.clean();
 
         let mut potential = vec![0; self.num_dendrites()];
-        let mut connected = vec![0; self.num_dendrites()];
+        let mut connected = vec![0.0; self.num_dendrites()];
 
         for &axon in activity.sparse().iter() {
             for syn in self.axn_syn_ranges[axon as usize].clone() {
                 let dend = self.syn_dendrites[syn as usize];
-                let permanence = self.syn_incidence[syn as usize];
-                if permanence >= self.incidence_rate {
-                    connected[dend as usize] += 1;
-                }
                 potential[dend as usize] += 1;
+                connected[dend as usize] += self.syn_weights[syn as usize];
             }
         }
         return (potential, connected);
@@ -173,16 +191,19 @@ impl Synapses {
         // dbg!(alpha);
         let axons = axons.dense();
         for &dend in dendrites.sparse() {
-            let mut sum_weights = 0;
+            let mut sum_weights = 0.0;
             for &syn in &self.den_synapses[dend as usize] {
                 let axon = self.syn_axons[syn as usize];
                 let axon_active = axons[axon as usize];
-                let weight = &mut self.syn_incidence[syn as usize];
+                let rate = &mut self.syn_incidence[syn as usize];
                 let target = if axon_active { 1.0 } else { 0.0 };
-                *weight += alpha * (target - *weight);
-                sum_weights += if *weight >= self.incidence_rate { 1 } else { 0 };
+                *rate += alpha * (target - *rate);
+                let rate = *rate;
+                let weight = self.weight_function(rate);
+                self.syn_weights[syn as usize] = weight;
+                sum_weights += weight;
             }
-            self.den_num_connected[dend as usize] = sum_weights;
+            self.den_sum_weights[dend as usize] = sum_weights;
         }
     }
 
@@ -203,7 +224,7 @@ impl Synapses {
         let mut syn_order = (0..self.num_synapses as Idx).into_iter();
 
         // Remove the dead synapses from consideration.
-        let mut syn_order = syn_order.filter(|&syn| self.syn_incidence[syn as usize] != 0.0);
+        let mut syn_order = syn_order.filter(|&syn| self.syn_incidence[syn as usize] >= self.minimum_incidence);
 
         // Sort the synapses by presynaptic axon and then postsynaptic dendrite.
         let mut syn_order: Vec<_> = syn_order.collect();
@@ -218,6 +239,7 @@ impl Synapses {
         self.syn_axons = syn_order.iter().map(|&x| self.syn_axons[x as usize]).collect();
         self.syn_dendrites = syn_order.iter().map(|&x| self.syn_dendrites[x as usize]).collect();
         self.syn_incidence = syn_order.iter().map(|&x| self.syn_incidence[x as usize]).collect();
+        self.syn_weights = syn_order.iter().map(|&x| self.syn_weights[x as usize]).collect();
     }
 
     fn rebuild_axons(&mut self) {
@@ -258,16 +280,15 @@ impl Synapses {
         }
 
         // Count the number of connected synapses.
-        if self.den_num_connected.capacity() < self.num_dendrites() {
-            self.den_num_connected = vec![0; self.num_dendrites()];
+        if self.den_sum_weights.capacity() < self.num_dendrites() {
+            self.den_sum_weights = vec![0.0; self.num_dendrites()];
         } else {
-            self.den_num_connected.fill(0);
-            self.den_num_connected.resize(self.num_dendrites(), 0);
+            self.den_sum_weights.fill(0.0);
+            self.den_sum_weights.resize(self.num_dendrites(), 0.0);
         }
         for syn in 0..self.num_synapses() {
-            if self.syn_incidence[syn] >= 0.5 {
-                self.den_num_connected[self.syn_dendrites[syn] as usize] += 1;
-            }
+            let den = self.syn_dendrites[syn] as usize;
+            self.den_sum_weights[den] += self.syn_weights[syn];
         }
     }
 }
@@ -288,38 +309,32 @@ impl std::fmt::Debug for Synapses {
             self.num_synapses(),
         );
         if self.clean {
+            let pot_count: Vec<_> = self.den_synapses.iter().map(|x| x.len() as f32).collect();
             let con_count: Vec<_> = self
                 .den_synapses
                 .iter()
-                .map(|x| {
-                    x.iter()
-                        .map(|&s| (self.syn_incidence[s as usize] >= self.incidence_rate) as u32 as f32)
-                        .sum::<f32>()
-                })
+                .map(|x| x.iter().map(|&s| self.syn_weights[s as usize]).sum::<f32>())
                 .collect();
-            let pot_count: Vec<_> = self.den_synapses.iter().map(|x| x.len() as f32).collect();
 
-            let (con_mean, con_std) = mean_std(&con_count);
             let (pot_mean, pot_std) = mean_std(&pot_count);
+            let (con_mean, con_std) = mean_std(&con_count);
 
-            // dendrite synapse counts, connected counts
-            // min max mean std
-            writeln!(f, "\n           |  min  |  max  |  mean |  std  |",)?;
+            writeln!(f, "\nDendrite     |  min  |  max  |  mean |  std  |",)?;
             writeln!(
                 f,
-                "Connected  | {:^5} | {:^5} | {:>5.1} | {:>5.1} |",
-                con_count.iter().fold(f32::NAN, |a, b| a.min(*b)),
-                con_count.iter().fold(f32::NAN, |a, b| a.max(*b)),
-                con_mean,
-                con_std
-            )?;
-            writeln!(
-                f,
-                "Potential  | {:^5} | {:^5} | {:>5.1} | {:>5.1} |",
+                "Num Synapses | {:^5} | {:^5} | {:>5.1} | {:>5.1} |",
                 pot_count.iter().fold(f32::NAN, |a, b| a.min(*b)),
                 pot_count.iter().fold(f32::NAN, |a, b| a.max(*b)),
                 pot_mean,
                 pot_std
+            )?;
+            writeln!(
+                f,
+                "Sum Weights  | {:^5.1} | {:^5.1} | {:>5.1} | {:>5.1} |",
+                con_count.iter().fold(f32::NAN, |a, b| a.min(*b)),
+                con_count.iter().fold(f32::NAN, |a, b| a.max(*b)),
+                con_mean,
+                con_std
             )?;
         }
         Ok(())
@@ -338,17 +353,18 @@ mod tests {
 
     #[test]
     fn basic() {
-        let mut x = Synapses::new(0.5, None);
+        let mut x = Synapses::new(0.05, 0.1, None);
         assert_eq!(x.add_axons(10), 0..10);
         assert_eq!(x.add_dendrites(10), 0..10);
-        let mut weights = [0.6, 0.4, 0.5].into_iter();
+        let mut weights = [10.0, 0.001, 10.0].into_iter();
         x.clean(); // :(
         x.grow_selective(&mut SDR::ones(10), 3, 3, 10, || weights.next().unwrap());
+        x.clean();
         dbg!(&x);
-        assert_eq!(x.num_synapses(), 3);
+        assert_eq!(x.num_synapses(), 2);
         let (pot, con) = x.activate(&mut SDR::ones(10));
-        assert_eq!(pot, [0, 0, 0, 3, 0, 0, 0, 0, 0, 0]);
-        assert_eq!(con, [0, 0, 0, 2, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(pot, [0, 0, 0, 2, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(con, [0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
 
         x.add_synapse(7, 7, 0.42);
         x.add_synapse(7, 9, 0.42);
@@ -361,15 +377,16 @@ mod tests {
         dbg!(&x.syn_axons);
         dbg!(&x.syn_dendrites);
         dbg!(&x.syn_incidence);
+        dbg!(&x.syn_weights);
         dbg!(&x.den_synapses);
-        dbg!(&x.den_num_connected);
+        dbg!(&x.den_sum_weights);
         // panic!("END OF TEST");
     }
 
     #[test]
     fn learn() {
         let num_syn = 10;
-        let mut x = Synapses::new(0.5, None);
+        let mut x = Synapses::new(0.05, 0.1, None);
         x.add_axons(num_syn);
         x.add_dendrites(num_syn);
         for syn in 0..num_syn {

@@ -79,9 +79,11 @@ def test_mnist():
             active_thresh = 10,
             potential_pct = .2,
             learning_period = 100,
-            incidence_rate = 0.1,
+            connected_incidence = 0.02,
+            saturated_incidence = 0.1,
             homeostatic_period = 1400,
-            num_steps=0,)
+            num_steps=0,
+            seed=None,)
 
     stats = htm_rs.Stats(1e6)
     sdrc = Classifier()

@@ -8,12 +8,12 @@ pub struct SpatialPooler {
     active_thresh: usize,
     potential_pct: f32,
     learning_period: f32,
-    incidence_rate: f32,
     homeostatic_period: Option<f32>,
 
     pub syn: Synapses,
     af: Vec<f32>,
 
+    seed: u64,
     num_steps: usize,
     step: usize,
     buffer: Vec<SDR>,
@@ -29,23 +29,25 @@ impl SpatialPooler {
         active_thresh: usize,
         potential_pct: f32,
         learning_period: f32,
-        incidence_rate: f32,
+        connected_incidence: f32,
+        saturated_incidence: f32,
         homeostatic_period: Option<f32>,
         num_steps: usize,
+        seed: Option<u64>,
     ) -> Self {
-        let mut syn = Synapses::new(incidence_rate, None);
+        let mut syn = Synapses::new(connected_incidence, saturated_incidence, seed);
         syn.add_dendrites(num_cells);
-        let sparsity = num_active as f32 / num_cells as f32;
         return Self {
             num_cells,
             num_active,
             active_thresh,
             potential_pct,
             learning_period,
-            incidence_rate,
             homeostatic_period,
+            seed: syn.seed(),
             syn,
             af: if homeostatic_period.is_some() {
+                let sparsity = num_active as f32 / num_cells as f32;
                 vec![sparsity; num_cells]
             } else {
                 vec![]
@@ -82,18 +84,18 @@ impl SpatialPooler {
     pub fn advance(&mut self, mut inputs: &mut SDR, learn: bool, output: Option<&mut SDR>) -> SDR {
         self.lazy_init(inputs);
 
-        let (connected, potential) = self.syn.activate(inputs);
+        let (potential, connected) = self.syn.activate(inputs);
 
         // Normalize the activity by the number of connected synapses.
         // Only when doing unsupervised learning.
         let mut activity: Vec<_> = if output.is_none() {
             connected
                 .iter()
-                .zip(self.syn.get_num_connected())
-                .map(|(&x, &nsyn)| if x == 0 { 0.0 } else { (x as f32) / (nsyn as f32) })
+                .zip(self.syn.get_sum_weights())
+                .map(|(&x, &w)| if x == 0.0 { 0.0 } else { x / w })
                 .collect()
         } else {
-            connected.iter().map(|x| *x as f32).collect()
+            connected
         };
 
         // Apply homeostatic control based on the cell activation frequency.
@@ -109,7 +111,7 @@ impl SpatialPooler {
         let mut sparse = Self::competition(&activity, self.num_active);
 
         // Apply the activation threshold.
-        sparse.retain(|&cell| connected[cell as usize] > self.active_thresh as Idx);
+        sparse.retain(|&cell| potential[cell as usize] > self.active_thresh as Idx);
 
         // Assign new cells to activate.
         // Only when doing unsupervised learning.
@@ -149,6 +151,12 @@ impl SpatialPooler {
     fn lazy_init(&mut self, inputs: &mut SDR) {
         if self.syn.num_axons() == 0 {
             self.syn.add_axons(inputs.num_cells());
+            // Initialize random synapses.
+            let mut all_inputs = SDR::ones(self.syn.num_axons());
+            for den in 0..self.syn.num_dendrites() {
+                self.syn
+                    .grow_competitive(&mut all_inputs, den as Idx, 0.1 * self.potential_pct);
+            }
         } else {
             assert!(inputs.num_cells() == self.num_inputs());
         }
@@ -183,8 +191,7 @@ impl SpatialPooler {
 
         // Grow new synapses.
         for &dend in activity.sparse() {
-            self.syn
-                .grow_competitive(inputs, dend, self.potential_pct, || self.incidence_rate);
+            self.syn.grow_competitive(inputs, dend, self.potential_pct);
         }
     }
 
@@ -232,9 +239,11 @@ mod tests {
             10,          // active_thresh
             0.5,         // potential_pct
             10.0,        // learning_period
-            0.1,         // incidence_rate
+            0.1,         // min incidence_rate
+            0.15,        // max incidence_rate
             Some(100.0), // homeostatic_period
-            0,
+            0,           // num steps
+            None,        // Seed
         );
         sp.reset();
         println!("{}", &sp);
@@ -279,18 +288,14 @@ mod tests {
             num_active, // num_active
             5,          // active_thresh
             0.5,        // potential_pct
-            10.0,       // learning_period
-            0.05,       // incidence_rate
+            5.0,        // learning_period
+            0.05,       // min incidence_rate
+            0.09,       // max incidence_rate
             None,       // homeostatic_period
             delay,      // num_steps
+            None,       // seed
         );
         let mut stats = Stats::new(100.0);
-
-        // Random init.
-        for noise in 0..10 {
-            nn.advance(&mut make_sdr(), true, Some(&mut make_sdr()));
-            // nn.advance(&mut make_sdr(), false, None);
-        }
 
         // Train.
         for trial in 0..10 {
@@ -302,9 +307,9 @@ mod tests {
 
         // This reset prevents the last elements of the training sequence from
         // learning the random noise.
-        nn.reset();
+        // nn.reset();
 
-        for noise in 0..10 {
+        for noise in 0..100 {
             nn.advance(&mut make_sdr(), true, Some(&mut make_sdr()));
         }
 
@@ -320,6 +325,6 @@ mod tests {
             dbg!(overlap);
             assert!(overlap >= 0.90);
         }
-        // panic!()
+        // panic!("END OF TEST")
     }
 }

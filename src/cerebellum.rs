@@ -10,6 +10,7 @@ pub struct Cerebellum {
     mossy_fibers: Stats,
     parallel_fibers: Stats,
     purkinje_fibers: Vec<Stats>,
+    seed: u64,
 }
 
 #[pymethods]
@@ -26,13 +27,16 @@ impl Cerebellum {
         granule_active_thresh: usize,
         granule_potential_pct: f32,
         granule_learning_period: f32,
-        granule_incidence_rate: f32,
+        granule_connected_rate: f32,
+        granule_saturated_rate: f32,
         granule_homeostatic_period: f32,
         purkinje_active_thresh: usize,
         purkinje_potential_pct: f32,
         purkinje_learning_period: f32,
-        purkinje_incidence_rate: f32,
+        purkinje_connected_rate: f32,
+        purkinje_saturated_rate: f32,
     ) -> Self {
+        let seed = 42;
         //
         let input_adapters: Vec<_> = input_spec
             .iter()
@@ -47,9 +51,11 @@ impl Cerebellum {
             granule_active_thresh,
             granule_potential_pct,
             granule_learning_period,
-            granule_incidence_rate,
+            granule_connected_rate,
+            granule_saturated_rate,
             Some(granule_homeostatic_period),
             0,
+            Some(seed),
         );
         let parallel_fibers = Stats::new(100.0);
         //
@@ -67,9 +73,11 @@ impl Cerebellum {
                 purkinje_active_thresh,
                 purkinje_potential_pct,
                 purkinje_learning_period,
-                purkinje_incidence_rate,
+                purkinje_connected_rate,
+                purkinje_saturated_rate,
                 None,
                 num_steps,
+                Some(seed),
             ));
             purkinje_fibers.push(Stats::new(100.0));
         }
@@ -82,6 +90,7 @@ impl Cerebellum {
             mossy_fibers,
             parallel_fibers,
             purkinje_fibers,
+            seed,
         };
     }
 
@@ -207,12 +216,14 @@ mod tests {
             5,           // granule_active_thresh
             0.05,        // granule_potential_pct
             10.0,        // granule_learning_period
-            0.05,        // granule_incidence_rate
+            0.05,        // granule_connected_rate
+            0.08,        // granule_saturated_rate
             100.0,       // granule_homeostatic_period
             5,           // purkinje_active_thresh
             0.5,         // purkinje_potential_pct
             10.0,        // purkinje_learning_period
-            0.05,        // purkinje_incidence_rate
+            0.01,        // purkinje_connected_rate
+            0.05,        // purkinje_saturated_rate
         );
 
         nn.reset();
@@ -238,6 +249,6 @@ mod tests {
             assert!(err(&pred, &out) < 0.01);
         }
 
-        panic!()
+        // panic!("END OF TEST")
     }
 }
