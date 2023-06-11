@@ -458,7 +458,7 @@ impl std::fmt::Debug for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(
             f,
-            "SDR Statistics({} cells, {} samples)",
+            "Statistics({} cells, {} samples)",
             self.num_cells(),
             self.num_samples()
         )?;

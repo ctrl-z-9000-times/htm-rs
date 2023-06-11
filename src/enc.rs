@@ -71,11 +71,15 @@ impl Encoder {
             return (f32::NAN, 0.0);
         }
         let confidence = sdr.percent_overlap(&mut self.encode(output));
-        if confidence <= 0.02 {
-            return (f32::NAN, confidence);
-        } else {
-            return (output, confidence);
-        }
+        // if confidence <= 0.02 {
+        //     return (f32::NAN, confidence);
+        // } else {
+        return (output, confidence);
+        // }
+    }
+
+    pub fn sample(&self) -> f32 {
+        return self.min + rand::random::<f32>() * (self.max - self.min);
     }
 }
 

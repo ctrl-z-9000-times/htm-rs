@@ -83,7 +83,7 @@ def test_mnist():
             homeostatic_period = 1400,
             num_steps=0,)
 
-    stats = htm_rs.Stats(sp.num_cells(), 1e6)
+    stats = htm_rs.Stats(1e6)
     sdrc = Classifier()
 
     # Training Loop

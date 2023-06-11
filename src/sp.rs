@@ -80,18 +80,21 @@ impl SpatialPooler {
     }
 
     pub fn advance(&mut self, mut inputs: &mut SDR, learn: bool, output: Option<&mut SDR>) -> SDR {
-        assert!(output.is_none() || learn);
         self.lazy_init(inputs);
 
         let (connected, potential) = self.syn.activate(inputs);
 
         // Normalize the activity by the number of connected synapses.
-        let mut activity: Vec<_> = connected
-            .iter()
-            .zip(self.syn.get_num_connected())
-            // .map(|(&x, &nsyn)| if x == 0 { 0.0 } else { (x as f32) / (nsyn as f32) })
-            .map(|(&x, &nsyn)| (x as f32))
-            .collect();
+        // Only when doing unsupervised learning.
+        let mut activity: Vec<_> = if output.is_none() {
+            connected
+                .iter()
+                .zip(self.syn.get_num_connected())
+                .map(|(&x, &nsyn)| if x == 0 { 0.0 } else { (x as f32) / (nsyn as f32) })
+                .collect()
+        } else {
+            connected.iter().map(|x| *x as f32).collect()
+        };
 
         // Apply homeostatic control based on the cell activation frequency.
         if self.homeostatic_period.is_some() {
@@ -117,25 +120,27 @@ impl SpatialPooler {
         let mut activity = SDR::from_sparse(self.num_cells, sparse);
 
         // Learn the association: input[t-num_steps] -> output[t]
-        if let Some(output) = output {
-            if self.num_steps() > 0 {
-                let mut prev_inputs = std::mem::replace(&mut self.buffer[self.step], inputs.clone());
-                self.step = (self.step + 1) % self.num_steps(); // Rotate our index into the circular buffer.
-                if prev_inputs.num_cells() == 0 {
-                    prev_inputs = SDR::zeros(self.num_inputs());
+        if learn {
+            if let Some(output) = output {
+                if self.num_steps() > 0 {
+                    let mut prev_inputs = std::mem::replace(&mut self.buffer[self.step], inputs.clone());
+                    self.step = (self.step + 1) % self.num_steps(); // Rotate our index into the circular buffer.
+                    if prev_inputs.num_cells() == 0 {
+                        prev_inputs = SDR::zeros(self.num_inputs());
+                    }
+                    self.learn(&mut prev_inputs, output);
+                } else {
+                    self.learn(inputs, output);
                 }
-                self.learn(&mut prev_inputs, output);
-            } else {
-                self.learn(inputs, output);
-            }
 
-            // Depress the synapses leading to the incorrect outputs.
-            // let incorrect = active - output;
-            // self.syn.hebbian(&mut input, &mut incorrect, decr, 0.0);
-            //
-        } else if learn {
-            self.learn(inputs, &mut activity);
-        };
+                // Depress the synapses leading to the incorrect outputs.
+                // let incorrect = active - output;
+                // self.syn.hebbian(&mut input, &mut incorrect, decr, 0.0);
+                //
+            } else {
+                self.learn(inputs, &mut activity);
+            }
+        }
         return activity;
     }
 }

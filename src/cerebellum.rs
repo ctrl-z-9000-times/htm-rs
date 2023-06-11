@@ -20,6 +20,7 @@ impl Cerebellum {
         input_spec: Vec<(f32, f32, f32)>,
         output_spec: Vec<(f32, f32, f32)>,
         input_num_active: usize,
+        output_num_active: usize,
         granule_num_cells: usize,
         granule_num_active: usize,
         granule_active_thresh: usize,
@@ -54,7 +55,7 @@ impl Cerebellum {
         //
         let output_adapters: Vec<_> = output_spec
             .iter()
-            .map(|(min, max, res)| Encoder::new_scalar(input_num_active, *min, *max, *res))
+            .map(|(min, max, res)| Encoder::new_scalar(output_num_active, *min, *max, *res))
             .collect();
         //
         let mut purkinje_cells = Vec::with_capacity(output_spec.len());
@@ -149,25 +150,33 @@ impl Cerebellum {
         let mut predictions = Vec::with_capacity(self.num_outputs());
         for (sdr, adapter) in purkinje_fibers.iter_mut().zip(&self.output_adapters) {
             let (mut value, confidence) = adapter.decode(sdr);
-            if confidence < 0.1 {
-                value = f32::NAN;
-            }
             predictions.push(value);
+            dbg!(confidence);
         }
         return predictions;
+    }
+
+    fn input_test_vector(&self) -> Vec<f32> {
+        return self.input_adapters.iter().map(|x| x.sample()).collect();
+    }
+    fn output_test_vector(&self) -> Vec<f32> {
+        return self.output_adapters.iter().map(|x| x.sample()).collect();
     }
 }
 
 impl std::fmt::Display for Cerebellum {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Cerebellum",)?;
+        // TODO: Print the basic input statistics.
+        writeln!(f, "Granule Cell Activity {}", self.parallel_fibers,)?;
         writeln!(f, "Granule Cell {}", self.granule_cells,)?;
-        writeln!(f, "Parallel Fibers {}", self.parallel_fibers,)?;
 
         for pf in 0..self.num_outputs() {
-            writeln!(f, "Output: {}", pf)?;
-            writeln!(f, "{}", self.purkinje_cells[pf],)?;
-            writeln!(f, "{}", self.purkinje_fibers[pf],)?;
+            if self.num_outputs() > 1 {
+                writeln!(f, "Output: {}", pf)?;
+            }
+            writeln!(f, "Purkinje Cell Activity {}", self.purkinje_fibers[pf],)?;
+            writeln!(f, "Purkinje Cell {}", self.purkinje_cells[pf],)?;
         }
         Ok(())
     }
@@ -183,40 +192,52 @@ mod tests {
 
     #[test]
     fn basic() {
-        let input_spec = vec![(0.0, 1.0, 0.1)];
+        // I want to see how much a default-configured cerebellum can remember.
+        // Let's just make a bunch of random input and output vectors.
+        let input_spec = vec![(0.0, 1.0, 0.01), (0.0, 1.0, 0.01), (0.0, 1.0, 0.01)];
         let output_spec = vec![(0.0, 1.0, 0.01)];
-        let mut x = Cerebellum::new(
+        let mut nn = Cerebellum::new(
             0,           // num_steps
             input_spec,  // input_spec
             output_spec, // output_spec
-            100,         // mossy_num_active
-            10_000,      // granule_num_cells
-            100,         // granule_num_active
+            50,          // mossy_num_active
+            50,          // output_num_active
+            100_000,     // granule_num_cells
+            50,          // granule_num_active
             5,           // granule_active_thresh
             0.05,        // granule_potential_pct
-            20.0,        // granule_learning_period
+            10.0,        // granule_learning_period
             0.05,        // granule_incidence_rate
-            10000.0,     // granule_homeostatic_period
+            100.0,       // granule_homeostatic_period
             5,           // purkinje_active_thresh
             0.5,         // purkinje_potential_pct
-            20.0,        // purkinje_learning_period
+            10.0,        // purkinje_learning_period
             0.05,        // purkinje_incidence_rate
         );
 
-        x.reset();
+        nn.reset();
 
-        let inp = vec![rand::random()];
-        let out = vec![rand::random()];
-        let nan = x.advance(&inp, Some(&out));
+        let num_samples = 100;
+        let all_inp: Vec<_> = (0..num_samples).map(|_| nn.input_test_vector()).collect();
+        let all_out: Vec<_> = (0..num_samples).map(|_| nn.output_test_vector()).collect();
+        let nan = nn.advance(&all_inp[0], Some(&all_out[0]));
         assert!(nan[0].is_nan());
-        for _train in 0..2 {
-            x.advance(&inp, Some(&out));
-        }
-        let pred = x.advance(&inp, Some(&out));
 
-        println!("{}", &x);
-        dbg!(pred[0], out[0]);
-        assert!(err(&pred, &out) < 0.02);
-        // panic!()
+        for _train in 0..1 {
+            for (inp, out) in all_inp.iter().zip(&all_out) {
+                nn.advance(inp, Some(out));
+            }
+        }
+
+        nn.reset();
+        println!("{}", &nn);
+
+        for (inp, out) in all_inp.iter().zip(&all_out) {
+            let pred = nn.advance(inp, None);
+            println!("correct {} output {}", out[0], pred[0]);
+            assert!(err(&pred, &out) < 0.01);
+        }
+
+        panic!()
     }
 }
