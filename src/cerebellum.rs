@@ -27,14 +27,14 @@ impl Cerebellum {
         granule_active_thresh: usize,
         granule_potential_pct: f32,
         granule_learning_period: f32,
-        granule_connected_rate: f32,
-        granule_saturated_rate: f32,
+        granule_incidence_rate: f32,
+        granule_incidence_gain: f32,
         granule_homeostatic_period: f32,
         purkinje_active_thresh: usize,
         purkinje_potential_pct: f32,
         purkinje_learning_period: f32,
-        purkinje_connected_rate: f32,
-        purkinje_saturated_rate: f32,
+        purkinje_incidence_rate: f32,
+        purkinje_incidence_gain: f32,
     ) -> Self {
         let seed = 42;
         //
@@ -51,8 +51,8 @@ impl Cerebellum {
             granule_active_thresh,
             granule_potential_pct,
             granule_learning_period,
-            granule_connected_rate,
-            granule_saturated_rate,
+            granule_incidence_rate,
+            granule_incidence_gain,
             Some(granule_homeostatic_period),
             0,
             Some(seed),
@@ -73,8 +73,8 @@ impl Cerebellum {
                 purkinje_active_thresh,
                 purkinje_potential_pct,
                 purkinje_learning_period,
-                purkinje_connected_rate,
-                purkinje_saturated_rate,
+                purkinje_incidence_rate,
+                purkinje_incidence_gain,
                 None,
                 num_steps,
                 Some(seed),
@@ -145,7 +145,11 @@ impl Cerebellum {
         } else {
             // Run the purkinje cells with no learning.
             for cells in &mut self.purkinje_cells {
-                purkinje_fibers.push(cells.advance(&mut parallel_fibers, false, None));
+                purkinje_fibers.push(cells.advance(
+                    &mut parallel_fibers,
+                    false,
+                    Some(&mut SDR::zeros(cells.num_outputs())),
+                ));
             }
         }
         // Update the purkinje fiber statistics.
@@ -177,15 +181,15 @@ impl std::fmt::Display for Cerebellum {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Cerebellum",)?;
         // TODO: Print the basic input statistics.
-        writeln!(f, "Granule Cell Activity {}", self.parallel_fibers,)?;
         writeln!(f, "Granule Cell {}", self.granule_cells,)?;
+        writeln!(f, "Granule Cell Activity {}", self.parallel_fibers,)?;
 
         for pf in 0..self.num_outputs() {
             if self.num_outputs() > 1 {
                 writeln!(f, "Output: {}", pf)?;
             }
-            writeln!(f, "Purkinje Cell Activity {}", self.purkinje_fibers[pf],)?;
             writeln!(f, "Purkinje Cell {}", self.purkinje_cells[pf],)?;
+            writeln!(f, "Purkinje Cell Activity {}", self.purkinje_fibers[pf],)?;
         }
         Ok(())
     }
@@ -209,32 +213,32 @@ mod tests {
             0,           // num_steps
             input_spec,  // input_spec
             output_spec, // output_spec
-            50,          // mossy_num_active
-            50,          // output_num_active
+            20,          // mossy_num_active
+            20,          // output_num_active
             100_000,     // granule_num_cells
-            50,          // granule_num_active
-            5,           // granule_active_thresh
-            0.05,        // granule_potential_pct
+            100,         // granule_num_active
+            10,          // granule_active_thresh
+            0.2,         // granule_potential_pct
             10.0,        // granule_learning_period
-            0.05,        // granule_connected_rate
-            0.08,        // granule_saturated_rate
+            0.1,         // granule_incidence_rate
+            21.0,        // granule_incidence_gain
             100.0,       // granule_homeostatic_period
             5,           // purkinje_active_thresh
             0.5,         // purkinje_potential_pct
             10.0,        // purkinje_learning_period
-            0.01,        // purkinje_connected_rate
-            0.05,        // purkinje_saturated_rate
+            0.05,        // purkinje_incidence_rate
+            50.0,        // purkinje_incidence_gain
         );
 
         nn.reset();
 
-        let num_samples = 100;
+        let num_samples = 200;
         let all_inp: Vec<_> = (0..num_samples).map(|_| nn.input_test_vector()).collect();
         let all_out: Vec<_> = (0..num_samples).map(|_| nn.output_test_vector()).collect();
         let nan = nn.advance(&all_inp[0], Some(&all_out[0]));
         assert!(nan[0].is_nan());
 
-        for _train in 0..1 {
+        for _train in 0..3 {
             for (inp, out) in all_inp.iter().zip(&all_out) {
                 nn.advance(inp, Some(out));
             }

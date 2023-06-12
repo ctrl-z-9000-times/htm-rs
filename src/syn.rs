@@ -5,9 +5,10 @@ use std::hash::{Hash, Hasher};
 use std::ops::Range;
 
 pub struct Synapses {
+    incidence_rate: f32,
+    incidence_gain: f32,
     minimum_incidence: f32,
-    connected_incidence: f32,
-    saturated_incidence: f32,
+    initial_incidence: f32,
     clean: bool,
     seed: u64,
 
@@ -32,16 +33,18 @@ pub struct Synapses {
 }
 
 impl Synapses {
-    pub fn new(connected_incidence: f32, saturated_incidence: f32, seed: Option<u64>) -> Self {
-        assert!(0.0 <= connected_incidence && connected_incidence <= 1.0);
-        assert!(0.0 <= saturated_incidence && saturated_incidence <= 1.0);
-        assert!(connected_incidence <= saturated_incidence);
-        // let syn_weight_halfway = 0.5 * (saturated_incidence + connected_incidence);
-        // let syn_weight_slope = 1.0 / (saturated_incidence - connected_incidence);
+    pub fn new(incidence_rate: f32, incidence_gain: f32, seed: Option<u64>) -> Self {
+        assert!(0.0 <= incidence_rate && incidence_rate <= 1.0);
+        assert!(f32::EPSILON < incidence_gain);
+        let linear_region = 1.0 / incidence_gain;
+        let minimum_incidence = incidence_rate - linear_region;
+        let initial_incidence = incidence_rate - 0.5 * linear_region;
+        assert!(minimum_incidence > f32::EPSILON);
         return Self {
-            minimum_incidence: connected_incidence * 0.1,
-            connected_incidence: connected_incidence,
-            saturated_incidence: saturated_incidence,
+            incidence_rate,
+            incidence_gain,
+            minimum_incidence,
+            initial_incidence,
             clean: false,
             seed: seed.unwrap_or_else(rand::random),
             num_synapses: 0,
@@ -104,9 +107,7 @@ impl Synapses {
     }
 
     pub fn weight_function(&self, incidence_rate: f32) -> f32 {
-        let sigmoid_halfway = 0.5 * (self.saturated_incidence + self.connected_incidence);
-        let sigmoid_slope = 1.0 / (self.saturated_incidence - self.connected_incidence);
-        return 1.0 / (1.0 + (-4.0 * sigmoid_slope * (incidence_rate - sigmoid_halfway)).exp());
+        return 1.0 / (1.0 + (-4.0 * self.incidence_gain * (incidence_rate - self.incidence_rate)).exp());
     }
 
     pub fn get_sum_weights(&self) -> &[f32] {
@@ -162,7 +163,7 @@ impl Synapses {
         // Make synapses to every axon in the potential pool. This will make
         // duplicate synapses, which will be removed next time it's cleaned.
         for axon in potential_pool {
-            self.add_synapse(axon, dendrite, self.connected_incidence);
+            self.add_synapse(axon, dendrite, self.initial_incidence);
         }
     }
 
@@ -353,7 +354,7 @@ mod tests {
 
     #[test]
     fn basic() {
-        let mut x = Synapses::new(0.05, 0.1, None);
+        let mut x = Synapses::new(0.05, 50.0, None);
         assert_eq!(x.add_axons(10), 0..10);
         assert_eq!(x.add_dendrites(10), 0..10);
         let mut weights = [10.0, 0.001, 10.0].into_iter();
@@ -386,7 +387,7 @@ mod tests {
     #[test]
     fn learn() {
         let num_syn = 10;
-        let mut x = Synapses::new(0.05, 0.1, None);
+        let mut x = Synapses::new(0.05, 50.0, None);
         x.add_axons(num_syn);
         x.add_dendrites(num_syn);
         for syn in 0..num_syn {

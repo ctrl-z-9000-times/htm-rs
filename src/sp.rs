@@ -1,4 +1,4 @@
-use crate::{Idx, Stats, Synapses, SDR};
+use crate::{Idx, Synapses, SDR};
 use pyo3::prelude::*;
 
 #[pyclass]
@@ -29,13 +29,13 @@ impl SpatialPooler {
         active_thresh: usize,
         potential_pct: f32,
         learning_period: f32,
-        connected_incidence: f32,
-        saturated_incidence: f32,
+        incidence_rate: f32,
+        incidence_gain: f32,
         homeostatic_period: Option<f32>,
         num_steps: usize,
         seed: Option<u64>,
     ) -> Self {
-        let mut syn = Synapses::new(connected_incidence, saturated_incidence, seed);
+        let mut syn = Synapses::new(incidence_rate, incidence_gain, seed);
         syn.add_dendrites(num_cells);
         return Self {
             num_cells,
@@ -56,6 +56,15 @@ impl SpatialPooler {
             step: 0,
             buffer: vec![SDR::zeros(0); num_steps],
         };
+    }
+
+    pub fn initialize_synapses(&mut self, num_inputs: usize, num_synapses: usize) {
+        let mut all_inputs = SDR::ones(num_inputs);
+        self.lazy_init(&mut all_inputs);
+        let pp = num_synapses as f32 / num_inputs as f32;
+        for den in 0..self.syn.num_dendrites() {
+            self.syn.grow_competitive(&mut all_inputs, den as Idx, pp);
+        }
     }
 
     pub fn num_cells(&self) -> usize {
@@ -151,12 +160,6 @@ impl SpatialPooler {
     fn lazy_init(&mut self, inputs: &mut SDR) {
         if self.syn.num_axons() == 0 {
             self.syn.add_axons(inputs.num_cells());
-            // Initialize random synapses.
-            let mut all_inputs = SDR::ones(self.syn.num_axons());
-            for den in 0..self.syn.num_dendrites() {
-                self.syn
-                    .grow_competitive(&mut all_inputs, den as Idx, 0.1 * self.potential_pct);
-            }
         } else {
             assert!(inputs.num_cells() == self.num_inputs());
         }
@@ -229,6 +232,7 @@ impl std::fmt::Display for SpatialPooler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Stats;
 
     #[test]
     fn basic() {
@@ -239,8 +243,8 @@ mod tests {
             10,          // active_thresh
             0.5,         // potential_pct
             10.0,        // learning_period
-            0.1,         // min incidence_rate
-            0.15,        // max incidence_rate
+            0.1,         // incidence_rate
+            50.0,        // incidence_gain
             Some(100.0), // homeostatic_period
             0,           // num steps
             None,        // Seed
@@ -289,13 +293,15 @@ mod tests {
             5,          // active_thresh
             0.5,        // potential_pct
             5.0,        // learning_period
-            0.05,       // min incidence_rate
-            0.09,       // max incidence_rate
+            0.05,       // incidence_rate
+            50.0,       // incidence_gain
             None,       // homeostatic_period
             delay,      // num_steps
             None,       // seed
         );
         let mut stats = Stats::new(100.0);
+
+        // nn.initialize_synapses(num_cells, 40);
 
         // Train.
         for trial in 0..10 {
@@ -319,7 +325,7 @@ mod tests {
         println!("{}", &stats);
 
         for t in 0..seq_len {
-            let mut prediction = nn.advance(&mut sequence[t].clone(), false, None);
+            let mut prediction = nn.advance(&mut sequence[t].clone(), false, Some(&mut sequence[t]));
             let correct = &mut sequence[(t + delay) % seq_len];
             let mut overlap = prediction.percent_overlap(correct);
             dbg!(overlap);
