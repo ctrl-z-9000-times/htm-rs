@@ -7,6 +7,12 @@ use std::ops::DerefMut;
 pub type Idx = u32;
 
 /// Sparse Distributed Representation
+///
+/// This represents a set of active cells. It provides two data formats: as a
+/// list of sparse indices, and as a slice of bits. This class caches both
+/// representations which requires a mutable reference "&mut" however this
+/// class is in fact immutable and never allows the contained data to be
+/// changed.
 #[pyclass]
 #[derive(Clone)]
 pub struct SDR {
@@ -270,7 +276,10 @@ impl std::fmt::Display for SDR {
     }
 }
 
+/// SDR Time-Series Statistics.
 ///
+/// This class tracks several key statistics about a stream of SDRs, for
+/// measuring the health and quality of algorithms that generate SDRs.
 #[pyclass]
 pub struct Stats {
     num_cells_: usize,
@@ -294,6 +303,7 @@ pub struct Stats {
 
 #[pymethods]
 impl Stats {
+    /// Argument period is for the exponential moving averages that track the data.
     #[new]
     pub fn new(period: f32) -> Self {
         return Stats {
@@ -313,6 +323,7 @@ impl Stats {
         };
     }
 
+    /// Add the next SDR to the data set.
     pub fn update(&mut self, sdr: &mut SDR) {
         if self.num_samples_ == 0 {
             self.num_cells_ = sdr.num_cells();
@@ -357,6 +368,8 @@ impl Stats {
         self.var_overlap_ = decay * (self.var_overlap_ + diff * incr);
     }
 
+    /// This does **not** reset the internally accrued statistics, it just
+    /// resets the current time-series data stream.
     pub fn reset(&mut self) {
         self.previous_sdr_ = SDR::zeros(self.num_cells());
     }
