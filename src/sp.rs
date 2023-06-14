@@ -1,63 +1,83 @@
 use crate::{Idx, Synapses, SDR};
 use pyo3::prelude::*;
 
+/// Spatial Pooler Algorithm
+///
+/// For more information see:  
+/// > The HTM Spatial Pooler-A Neocortical Algorithm for Online Sparse Distributed Coding  
+/// > Yuwei Cui, Subutai Ahmad and Jeff Hawkins (2017)  
+/// > <https://doi.org/10.3389/fncom.2017.00111>
 #[pyclass]
 pub struct SpatialPooler {
     num_cells: usize,
     num_active: usize,
-    active_thresh: usize,
-    potential_pct: f32,
-    learning_period: f32,
-    homeostatic_period: Option<f32>,
-
-    pub syn: Synapses,
-    af: Vec<f32>,
-
-    seed: u64,
     num_steps: usize,
+    threshold: f32,
+    potential_pct: f32,
+    learning_period: usize,
+    boosting_period: Option<usize>,
+    seed: u64,
+
+    syn: Synapses,
+    af: Vec<f32>,
     step: usize,
     buffer: Vec<SDR>,
 }
 
 #[pymethods]
 impl SpatialPooler {
+    /// Argument **num_cells**:  
+    /// Argument **num_active**:  
+    /// Argument **num_steps**: Number of time-steps into the future to predict.  
+    /// Argument **threshold**: Fraction of the input activity which cells must match before they can activate.  
+    /// Argument **potential_pct**: Fraction of the input axons which each cell can connect to.  
+    /// Argument **learning_period**: Time constant of the exponential moving average that controls
+    ///     the synaptic weights. This controls how fast it learns.
+    /// Argument **num_patterns**:  Maximum number of different SDRs that dendrite can learn about
+    ///     before it starts pruning off the least used synapses.  
+    /// Argument **weight_gain**: Slope of the synapse weight function.
+    ///     This controls how quickly hebbian learning saturates.
+    ///     A value of 1.0 will have the maximum linear range, and larger values will divide the linear range.  
+    /// Argument **boosting_period**:  
+    /// Argument **seed**: For random number generation. If None is given then this uses a OS-random.  
     #[new]
-    // #[args()] // TODO: Make the python version pretty w/ default values.
+    // #[pyo3(signature = (seed = "None"))]
     pub fn new(
         num_cells: usize,
         num_active: usize,
-        active_thresh: usize,
-        potential_pct: f32,
-        learning_period: f32,
-        incidence_rate: f32,
-        incidence_gain: f32,
-        homeostatic_period: Option<f32>,
         num_steps: usize,
+        threshold: f32,
+        potential_pct: f32,
+        learning_period: usize,
+        num_patterns: usize,
+        weight_gain: f32,
+        boosting_period: Option<usize>,
         seed: Option<u64>,
     ) -> Self {
-        let mut syn = Synapses::new(incidence_rate, incidence_gain, seed);
+        let mut syn = Synapses::new(num_patterns, weight_gain, seed);
         syn.add_dendrites(num_cells);
         return Self {
             num_cells,
             num_active,
-            active_thresh,
+            num_steps,
+            threshold,
             potential_pct,
             learning_period,
-            homeostatic_period,
-            seed: syn.seed(),
+            boosting_period,
+            seed: syn.seed() + 1,
             syn,
-            af: if homeostatic_period.is_some() {
+            af: if boosting_period.is_some() {
                 let sparsity = num_active as f32 / num_cells as f32;
                 vec![sparsity; num_cells]
             } else {
                 vec![]
             },
-            num_steps,
             step: 0,
             buffer: vec![SDR::zeros(0); num_steps],
         };
     }
 
+    /// Grow random synapses on every cell in the spatial pooler.
     pub fn initialize_synapses(&mut self, num_inputs: usize, num_synapses: usize) {
         let mut all_inputs = SDR::ones(num_inputs);
         self.lazy_init(&mut all_inputs);
@@ -93,34 +113,16 @@ impl SpatialPooler {
     pub fn advance(&mut self, mut inputs: &mut SDR, learn: bool, output: Option<&mut SDR>) -> SDR {
         self.lazy_init(inputs);
 
-        let (potential, connected) = self.syn.activate(inputs);
+        let (potential, mut connected) = self.syn.activate(inputs);
 
-        // Normalize the activity by the number of connected synapses.
-        // Only when doing unsupervised learning.
-        let mut activity: Vec<_> = if output.is_none() {
-            connected
-                .iter()
-                .zip(self.syn.get_sum_weights())
-                .map(|(&x, &w)| if x == 0.0 { 0.0 } else { x / w })
-                .collect()
-        } else {
-            connected
-        };
-
-        // Apply homeostatic control based on the cell activation frequency.
-        if self.homeostatic_period.is_some() {
-            let sparsity = self.num_active as f32 / self.num_cells as f32;
-            let boost_factor_adjust = 1.0 / sparsity.log2();
-            for (x, f) in activity.iter_mut().zip(&self.af) {
-                *x = *x * f.log2() * boost_factor_adjust;
-            }
-        }
+        self.apply_boosting(&mut connected);
 
         // Run the Winner-Takes-All Competition.
-        let mut sparse = Self::competition(&activity, self.num_active);
+        let mut sparse = Self::competition(&connected, self.num_active);
 
         // Apply the activation threshold.
-        sparse.retain(|&cell| potential[cell as usize] > self.active_thresh as Idx);
+        let threshold = self.threshold * self.potential_pct * inputs.num_active() as f32;
+        sparse.retain(|&cell| connected[cell as usize] > threshold);
 
         // Assign new cells to activate.
         // Only when doing unsupervised learning.
@@ -176,7 +178,7 @@ impl SpatialPooler {
     }
 
     fn activate_least_used(&self, sparse: &mut Vec<Idx>, num_active: usize) {
-        if sparse.len() < num_active && self.homeostatic_period.is_some() {
+        if sparse.len() < num_active && self.boosting_period.is_some() {
             let num_new = num_active - sparse.len();
             // Select the cells with the lowest activation frequency.
             let mut min_af: Vec<_> = (0..self.num_cells as Idx).collect();
@@ -190,7 +192,7 @@ impl SpatialPooler {
         self.update_af(activity);
 
         // Hebbian learning.
-        self.syn.learn(inputs, activity, self.learning_period);
+        self.syn.learn(inputs, activity, self.learning_period as f32);
 
         // Grow new synapses.
         for &dend in activity.sparse() {
@@ -198,9 +200,20 @@ impl SpatialPooler {
         }
     }
 
+    fn apply_boosting(&self, activity: &mut Vec<f32>) {
+        // Apply homeostatic control based on the cell activation frequency.
+        if self.boosting_period.is_some() {
+            let sparsity = self.num_active as f32 / self.num_cells as f32;
+            let boost_factor_adjust = 1.0 / sparsity.log2();
+            for (x, f) in activity.iter_mut().zip(&self.af) {
+                *x = *x * f.log2() * boost_factor_adjust;
+            }
+        }
+    }
+
     fn update_af(&mut self, activity: &mut SDR) {
-        if let Some(period) = self.homeostatic_period {
-            let decay = (-1.0f32 / period).exp();
+        if let Some(period) = self.boosting_period {
+            let decay = (-1.0f32 / period as f32).exp();
             let alpha = 1.0 - decay;
             // dbg!(alpha, decay);
             for (frq, state) in self.af.iter_mut().zip(activity.dense().iter()) {
@@ -238,16 +251,16 @@ mod tests {
     fn basic() {
         let make_sdr = || SDR::random(1000, 0.1);
         let mut sp = SpatialPooler::new(
-            2000,        // num_cells
-            40,          // num_active
-            10,          // active_thresh
-            0.5,         // potential_pct
-            10.0,        // learning_period
-            0.1,         // incidence_rate
-            50.0,        // incidence_gain
-            Some(100.0), // homeostatic_period
-            0,           // num steps
-            None,        // Seed
+            2000,      // num_cells
+            40,        // num_active
+            0,         // num steps
+            0.1,       // threshold
+            0.5,       // potential_pct
+            10,        // learning_period
+            10,        // num_patterns
+            5.0,       // gain
+            Some(100), // boosting_period
+            None,      // Seed
         );
         sp.reset();
         println!("{}", &sp);
@@ -290,13 +303,13 @@ mod tests {
         let mut nn = SpatialPooler::new(
             num_cells,  // num_cells
             num_active, // num_active
-            5,          // active_thresh
-            0.5,        // potential_pct
-            5.0,        // learning_period
-            0.05,       // incidence_rate
-            50.0,       // incidence_gain
-            None,       // homeostatic_period
             delay,      // num_steps
+            0.01,       // threshold
+            0.5,        // potential_pct
+            5,          // learning_period
+            20,         // num_patterns
+            2.5,        // incidence_gain
+            None,       // boosting_period
             None,       // seed
         );
         let mut stats = Stats::new(100.0);

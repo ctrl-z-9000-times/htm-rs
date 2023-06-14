@@ -76,13 +76,13 @@ def test_mnist():
     sp = htm_rs.SpatialPooler(
             num_cells  = 1400,
             num_active =  140,
-            active_thresh = 10,
+            num_steps = 0,
+            threshold = .1,
             potential_pct = .2,
             learning_period = 100,
-            connected_incidence = 0.02,
-            saturated_incidence = 0.1,
-            homeostatic_period = 1400,
-            num_steps=0,
+            max_num_patterns = 20,
+            weight_gain = 100,
+            boosting_period = 1400,
             seed=None,)
 
     stats = htm_rs.Stats(1e6)

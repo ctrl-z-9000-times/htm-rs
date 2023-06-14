@@ -5,9 +5,9 @@ use std::hash::{Hash, Hasher};
 use std::ops::Range;
 
 pub struct Synapses {
-    incidence_rate: f32,
-    incidence_gain: f32,
-    minimum_incidence: f32,
+    incidence_thresh: f32,  // Halfway point of weight function.
+    incidence_slope: f32,   // Slope of weight function.
+    minimum_incidence: f32, // Threshold for removal.
     initial_incidence: f32,
     clean: bool,
     seed: u64,
@@ -33,16 +33,17 @@ pub struct Synapses {
 }
 
 impl Synapses {
-    pub fn new(incidence_rate: f32, incidence_gain: f32, seed: Option<u64>) -> Self {
-        assert!(0.0 <= incidence_rate && incidence_rate <= 1.0);
-        assert!(f32::EPSILON < incidence_gain);
-        let linear_region = 1.0 / incidence_gain;
-        let minimum_incidence = incidence_rate - linear_region;
-        let initial_incidence = incidence_rate - 0.5 * linear_region;
-        assert!(minimum_incidence > f32::EPSILON);
+    pub fn new(num_patterns: usize, mut weight_gain: f32, seed: Option<u64>) -> Self {
+        assert!(num_patterns > 0);
+        assert!(weight_gain >= 1.0);
+        let num_patterns = num_patterns as f32;
+        let incidence_thresh = 1.0 / num_patterns;
+        let linear_region = incidence_thresh / weight_gain;
+        let minimum_incidence = incidence_thresh - linear_region; // Close to zero, weight is ~2%.
+        let initial_incidence = incidence_thresh - 0.5 * linear_region; // Start of the linear region, weight is ~10%.
         return Self {
-            incidence_rate,
-            incidence_gain,
+            incidence_thresh,
+            incidence_slope: weight_gain * num_patterns,
             minimum_incidence,
             initial_incidence,
             clean: false,
@@ -107,7 +108,8 @@ impl Synapses {
     }
 
     pub fn weight_function(&self, incidence_rate: f32) -> f32 {
-        return 1.0 / (1.0 + (-4.0 * self.incidence_gain * (incidence_rate - self.incidence_rate)).exp());
+        // Logistics function.
+        return 1.0 / (1.0 + (-4.0 * self.incidence_slope * (incidence_rate - self.incidence_thresh)).exp());
     }
 
     pub fn get_sum_weights(&self) -> &[f32] {
@@ -354,7 +356,7 @@ mod tests {
 
     #[test]
     fn basic() {
-        let mut x = Synapses::new(0.05, 50.0, None);
+        let mut x = Synapses::new(20, 2.5, None);
         assert_eq!(x.add_axons(10), 0..10);
         assert_eq!(x.add_dendrites(10), 0..10);
         let mut weights = [10.0, 0.001, 10.0].into_iter();
@@ -387,7 +389,7 @@ mod tests {
     #[test]
     fn learn() {
         let num_syn = 10;
-        let mut x = Synapses::new(0.05, 50.0, None);
+        let mut x = Synapses::new(20, 2.5, None);
         x.add_axons(num_syn);
         x.add_dendrites(num_syn);
         for syn in 0..num_syn {
