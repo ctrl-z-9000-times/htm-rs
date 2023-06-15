@@ -94,14 +94,15 @@ impl Encoder {
         let sparse = sdr.sparse();
         let mut start = 0;
         let mut end = 0;
-        let mut max_cells = 0;
-        let mut max_start = 0;
+        let mut max_active = 0;
+        let mut max_range = (0..0);
         while start < num_active {
+            let active_inside = end - start + 1;
             let cells_inside = sparse[end] - sparse[start] + 1;
             // Search for the span with the most active cells inside of it.
-            if cells_inside > max_cells {
-                max_cells = cells_inside;
-                max_start = start;
+            if active_inside > max_active {
+                max_active = active_inside;
+                max_range = (start..end);
             }
             // Move the end of the box forward.
             if cells_inside < box_filter && end < num_active - 1 {
@@ -112,8 +113,9 @@ impl Encoder {
                 start += 1;
             }
         }
-        // Convert the box filter's area into a scalar.
-        return sparse[max_start] as f32 / (self.num_cells - self.num_active) as f32;
+        // Convert the box filter's location into a scalar.
+        let pct = (sparse[max_range.start] as f32 / (self.num_cells - box_filter) as f32).clamp(0.0, 1.0);
+        return self.min + pct * (self.max - self.min);
     }
 
     fn decode_category(&self, sdr: &mut SDR) -> f32 {
@@ -155,5 +157,23 @@ mod tests {
         assert!(enc.decode(&mut x0) == (0.0, 1.0));
         assert!(enc.decode(&mut x1) == (1.0, 1.0));
         assert!(enc.decode(&mut x2) == (0.5, 1.0));
+    }
+
+    #[test]
+    fn decode_scalar() {
+        let abs_err = |a: f32, b: f32| (a - b).abs();
+        let enc = Encoder::new_scalar(20, -1.0, 1.0, 0.1);
+        dbg!(&enc);
+        for _trial in 0..1000 {
+            let x1 = (rand::random::<f32>() - 0.5) * 2.0;
+            dbg!(x1);
+            let mut y = enc.encode(x1);
+            let mut y = y.corrupt(0.1);
+            let (x2, conf) = enc.decode(&mut y);
+            dbg!(x2);
+            assert!(abs_err(x1, x2) < 0.05);
+            dbg!(conf);
+            assert!(conf >= 0.8);
+        }
     }
 }
