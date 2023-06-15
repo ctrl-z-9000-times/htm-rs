@@ -16,7 +16,6 @@ pub struct SpatialPooler {
     potential_pct: f32,
     learning_period: usize,
     boosting_period: Option<usize>,
-    seed: u64,
 
     syn: Synapses,
     af: Vec<f32>,
@@ -64,7 +63,6 @@ impl SpatialPooler {
             potential_pct,
             learning_period,
             boosting_period,
-            seed: syn.seed() + 1,
             syn,
             af: if boosting_period.is_some() {
                 let sparsity = num_active as f32 / num_cells as f32;
@@ -99,6 +97,9 @@ impl SpatialPooler {
     pub fn num_steps(&self) -> usize {
         return self.num_steps;
     }
+    pub fn seed(&self) -> u64 {
+        return self.syn.seed();
+    }
 
     fn __str__(&self) -> String {
         return format!("{}", self);
@@ -117,12 +118,24 @@ impl SpatialPooler {
 
         self.apply_boosting(&mut connected);
 
+        // Normalize the activity by the sum of synapse weights to the cell.
+        // Only when not unsupervised.
+        let normalized: Vec<_> = if output.is_none() {
+            connected
+                .iter()
+                .zip(self.syn.get_sum_weights())
+                .map(|(x, w)| if *w > f32::EPSILON { *x / w } else { 0.0 })
+                .collect()
+        } else {
+            connected.clone()
+        };
+
         // Run the Winner-Takes-All Competition.
-        let mut sparse = Self::competition(&connected, self.num_active);
+        let mut sparse = Self::competition(&normalized, self.num_active);
 
         // Apply the activation threshold.
-        let threshold = self.threshold * self.potential_pct * inputs.num_active() as f32;
-        sparse.retain(|&cell| connected[cell as usize] > threshold);
+        // let threshold = self.threshold * self.potential_pct * inputs.num_active() as f32;
+        sparse.retain(|&cell| normalized[cell as usize] > self.threshold);
 
         // Assign new cells to activate.
         // Only when doing unsupervised learning.
@@ -231,7 +244,7 @@ fn cmp_f32(a: f32, b: f32) -> std::cmp::Ordering {
     } else if a == b {
         std::cmp::Ordering::Equal
     } else {
-        panic!()
+        panic!("{} ?= {}", a, b)
     }
 }
 

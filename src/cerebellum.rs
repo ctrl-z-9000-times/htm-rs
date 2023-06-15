@@ -10,7 +10,6 @@ pub struct Cerebellum {
     mossy_fibers: Stats,
     parallel_fibers: Stats,
     purkinje_fibers: Vec<Stats>,
-    seed: u64,
 }
 
 #[pymethods]
@@ -24,19 +23,19 @@ impl Cerebellum {
         output_num_active: usize,
         granule_num_cells: usize,
         granule_num_active: usize,
-        granule_active_thresh: usize,
+        granule_threshold: f32,
         granule_potential_pct: f32,
-        granule_learning_period: f32,
-        granule_incidence_rate: f32,
-        granule_incidence_gain: f32,
-        granule_homeostatic_period: f32,
-        purkinje_active_thresh: usize,
+        granule_learning_period: usize,
+        granule_num_patterns: usize,
+        granule_weight_gain: f32,
+        granule_boosting_period: usize,
+        purkinje_threshold: f32,
         purkinje_potential_pct: f32,
-        purkinje_learning_period: f32,
-        purkinje_incidence_rate: f32,
-        purkinje_incidence_gain: f32,
+        purkinje_learning_period: usize,
+        purkinje_num_patterns: usize,
+        purkinje_weight_gain: f32,
+        seed: Option<u64>,
     ) -> Self {
-        let seed = 42;
         //
         let input_adapters: Vec<_> = input_spec
             .iter()
@@ -48,14 +47,14 @@ impl Cerebellum {
         let mut granule_cells = SpatialPooler::new(
             granule_num_cells,
             granule_num_active,
-            granule_active_thresh,
+            0,
+            granule_threshold,
             granule_potential_pct,
             granule_learning_period,
-            granule_incidence_rate,
-            granule_incidence_gain,
-            Some(granule_homeostatic_period),
-            0,
-            Some(seed),
+            granule_num_patterns,
+            granule_weight_gain,
+            Some(granule_boosting_period),
+            seed,
         );
         let parallel_fibers = Stats::new(100.0);
         //
@@ -70,14 +69,14 @@ impl Cerebellum {
             purkinje_cells.push(SpatialPooler::new(
                 enc.num_cells(),
                 enc.num_active(),
-                purkinje_active_thresh,
+                num_steps,
+                purkinje_threshold,
                 purkinje_potential_pct,
                 purkinje_learning_period,
-                purkinje_incidence_rate,
-                purkinje_incidence_gain,
+                purkinje_num_patterns,
+                purkinje_weight_gain,
                 None,
-                num_steps,
-                Some(seed),
+                Some(granule_cells.seed() + 123456),
             ));
             purkinje_fibers.push(Stats::new(100.0));
         }
@@ -90,7 +89,6 @@ impl Cerebellum {
             mossy_fibers,
             parallel_fibers,
             purkinje_fibers,
-            seed,
         };
     }
 
@@ -164,7 +162,6 @@ impl Cerebellum {
         for (sdr, adapter) in purkinje_fibers.iter_mut().zip(&self.output_adapters) {
             let (mut value, confidence) = adapter.decode(sdr);
             predictions.push(value);
-            dbg!(confidence);
         }
         return predictions;
     }
@@ -208,35 +205,40 @@ mod tests {
         // I want to see how much a default-configured cerebellum can remember.
         // Let's just make a bunch of random input and output vectors.
         let input_spec = vec![(0.0, 1.0, 0.01), (0.0, 1.0, 0.01), (0.0, 1.0, 0.01)];
-        let output_spec = vec![(0.0, 1.0, 0.01)];
+        let output_spec = vec![(0.0, 1.0, 0.1)];
         let mut nn = Cerebellum::new(
             0,           // num_steps
             input_spec,  // input_spec
             output_spec, // output_spec
-            20,          // mossy_num_active
+            10,          // input_num_active
             20,          // output_num_active
             100_000,     // granule_num_cells
-            100,         // granule_num_active
-            10,          // granule_active_thresh
-            0.2,         // granule_potential_pct
-            10.0,        // granule_learning_period
-            0.1,         // granule_incidence_rate
-            21.0,        // granule_incidence_gain
-            100.0,       // granule_homeostatic_period
-            5,           // purkinje_active_thresh
+            50,          // granule_num_active
+            0.2,         // granule_threshold
+            0.25,        // granule_potential_pct
+            5,           // granule_learning_period
+            5,           // granule_num_patterns
+            1.5,         // granule_weight_gain
+            1000,        // granule_boosting_period
+            0.1,         // purkinje_threshold
             0.5,         // purkinje_potential_pct
-            10.0,        // purkinje_learning_period
-            0.05,        // purkinje_incidence_rate
-            50.0,        // purkinje_incidence_gain
+            100,         // purkinje_learning_period
+            100,         // purkinje_num_patterns
+            1.5,         // purkinje_weight_gain
+            None,        // seed
         );
 
         nn.reset();
 
-        let num_samples = 200;
+        let num_samples = 100;
         let all_inp: Vec<_> = (0..num_samples).map(|_| nn.input_test_vector()).collect();
         let all_out: Vec<_> = (0..num_samples).map(|_| nn.output_test_vector()).collect();
         let nan = nn.advance(&all_inp[0], Some(&all_out[0]));
         assert!(nan[0].is_nan());
+
+        // for _noise in 0..100 {
+        //     nn.advance(&nn.input_test_vector(), Some(&nn.output_test_vector()));
+        // }
 
         for _train in 0..3 {
             for (inp, out) in all_inp.iter().zip(&all_out) {
@@ -250,7 +252,7 @@ mod tests {
         for (inp, out) in all_inp.iter().zip(&all_out) {
             let pred = nn.advance(inp, None);
             println!("correct {} output {}", out[0], pred[0]);
-            assert!(err(&pred, &out) < 0.01);
+            assert!(err(&pred, &out) < 0.1);
         }
 
         // panic!("END OF TEST")

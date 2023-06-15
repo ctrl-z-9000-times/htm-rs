@@ -16,9 +16,6 @@ pub use enc::Encoder;
 mod cerebellum;
 pub use cerebellum::Cerebellum;
 
-// mod tm;
-// pub use tm::TemporalMemory;
-
 use pyo3::prelude::*;
 
 ///
