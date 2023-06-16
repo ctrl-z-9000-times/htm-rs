@@ -47,7 +47,7 @@ impl Encoder {
     }
 
     pub fn encode(&self, value: f32) -> SDR {
-        assert!(self.min <= value && value <= self.max);
+        let value = value.clamp(self.min, self.max);
         // Normalize the value into the range [0, 1).
         let value = (value - self.min) / (self.max - self.min);
         let value = value.clamp(0.0, 1.0 - f32::EPSILON);

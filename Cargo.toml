@@ -7,6 +7,9 @@ edition = "2021"
 name = "htm_rs"
 crate-type = ["rlib", "cdylib"]
 
+[profile.release]
+debug = 1
+
 [dependencies]
 bitvec = "1.0"
 ndarray = "0.15"
