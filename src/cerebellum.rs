@@ -214,7 +214,7 @@ mod tests {
             20,          // output_num_active
             100_000,     // granule_num_cells
             50,          // granule_num_active
-            0.2,         // granule_threshold
+            0.5,         // granule_threshold
             0.25,        // granule_potential_pct
             5,           // granule_learning_period
             5,           // granule_num_patterns
@@ -230,7 +230,7 @@ mod tests {
 
         nn.reset();
 
-        let num_samples = 100;
+        let num_samples = if cfg!(debug_assertions) { 10 } else { 500 };
         let all_inp: Vec<_> = (0..num_samples).map(|_| nn.input_test_vector()).collect();
         let all_out: Vec<_> = (0..num_samples).map(|_| nn.output_test_vector()).collect();
         let nan = nn.advance(&all_inp[0], Some(&all_out[0]));
