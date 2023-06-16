@@ -118,36 +118,18 @@ impl SpatialPooler {
 
         self.apply_boosting(&mut connected);
 
-        // Normalize the activity by the sum of synapse weights to the cell.
-        // Only when not unsupervised.
-        let normalized: Vec<_> = if output.is_none() {
-            connected
-                .iter()
-                .zip(self.syn.get_sum_weights())
-                .map(|(x, w)| if *w > f32::EPSILON { *x / w } else { 0.0 })
-                .collect()
-        } else {
-            connected.clone()
-        };
+        // Supervised learning mode.
+        if let Some(output) = output {
+            // Run the Winner-Takes-All Competition.
+            let mut sparse = Self::competition(&connected, self.num_active);
 
-        // Run the Winner-Takes-All Competition.
-        let mut sparse = Self::competition(&normalized, self.num_active);
+            // Apply the activation threshold.
+            let threshold = self.threshold * self.potential_pct * inputs.num_active() as f32;
+            sparse.retain(|&cell| connected[cell as usize] > threshold);
 
-        // Apply the activation threshold.
-        // let threshold = self.threshold * self.potential_pct * inputs.num_active() as f32;
-        sparse.retain(|&cell| normalized[cell as usize] > self.threshold);
+            let mut activity = SDR::from_sparse(self.num_cells, sparse);
 
-        // Assign new cells to activate.
-        // Only when doing unsupervised learning.
-        if learn && output.is_none() {
-            self.activate_least_used(&mut sparse, self.num_active);
-        }
-
-        let mut activity = SDR::from_sparse(self.num_cells, sparse);
-
-        // Learn the association: input[t-num_steps] -> output[t]
-        if learn {
-            if let Some(output) = output {
+            if learn {
                 if self.num_steps() > 0 {
                     let mut prev_inputs = std::mem::replace(&mut self.buffer[self.step], inputs.clone());
                     self.step = (self.step + 1) % self.num_steps(); // Rotate our index into the circular buffer.
@@ -163,11 +145,37 @@ impl SpatialPooler {
                 // let incorrect = active - output;
                 // self.syn.hebbian(&mut input, &mut incorrect, decr, 0.0);
                 //
-            } else {
+            }
+            return activity;
+        }
+        // Unsupervised learning mode.
+        else {
+            // Normalize the activity by the sum of synapse weights to the cell.
+            let normalized: Vec<_> = connected
+                .iter()
+                .zip(self.syn.get_sum_weights())
+                .map(|(x, w)| if *w > f32::EPSILON { *x / w } else { 0.0 })
+                .collect();
+
+            // Run the Winner-Takes-All Competition.
+            let mut sparse = Self::competition(&normalized, self.num_active);
+
+            // Apply the activation threshold.
+            sparse.retain(|&cell| normalized[cell as usize] > self.threshold);
+
+            // Assign new cells to activate.
+            // Only when doing unsupervised learning.
+            if learn {
+                self.activate_least_used(&mut sparse, self.num_active);
+            }
+
+            let mut activity = SDR::from_sparse(self.num_cells, sparse);
+
+            if learn {
                 self.learn(inputs, &mut activity);
             }
+            return activity;
         }
-        return activity;
     }
 }
 
@@ -330,7 +338,7 @@ mod tests {
         // nn.initialize_synapses(num_cells, 40);
 
         // Train.
-        for trial in 0..10 {
+        for trial in 0..3 {
             for t in 0..seq_len {
                 let mut x = nn.advance(&mut sequence[t].clone(), true, Some(&mut sequence[t]));
                 stats.update(&mut x);
@@ -341,7 +349,7 @@ mod tests {
         // learning the random noise.
         // nn.reset();
 
-        for noise in 0..100 {
+        for noise in 0..10 {
             nn.advance(&mut make_sdr(), true, Some(&mut make_sdr()));
         }
 

@@ -107,6 +107,7 @@ impl Cerebellum {
         }
     }
 
+    #[pyo3(name = "advance")]
     fn py_advance(&mut self, inputs: Vec<f32>, outputs: Option<Vec<f32>>) -> Vec<f32> {
         let output_slice = outputs.as_ref().map(|x| x.as_slice());
         return self.advance(&inputs, output_slice);
